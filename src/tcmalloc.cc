@@ -229,6 +229,7 @@ extern "C" {
   int tc_mallopt(int cmd, int value) PERFTOOLS_THROW
       ATTRIBUTE_SECTION(google_malloc);
 #ifdef HAVE_STRUCT_MALLINFO
+  //返回当前malloc信息
   struct mallinfo tc_mallinfo(void) PERFTOOLS_THROW
       ATTRIBUTE_SECTION(google_malloc);
 #endif
@@ -261,6 +262,7 @@ extern "C" {
   //    OS X: malloc_size()
   //    glibc: malloc_usable_size()
   //    Windows: _msize()
+  //这个指针实际可用内存大小
   size_t tc_malloc_size(void* p) PERFTOOLS_THROW
       ATTRIBUTE_SECTION(google_malloc);
 }  // extern "C"
