@@ -306,7 +306,9 @@ void* MmapSysAllocator::Alloc(size_t size, size_t *actual_size,
   // Enforce page alignment
   if (pagesize == 0) pagesize = getpagesize();
   if (alignment < pagesize) alignment = pagesize;
+  //将aligned_size round-up为alignment的倍数
   size_t aligned_size = ((size + alignment - 1) / alignment) * alignment;
+  //impossiblely happen?
   if (aligned_size < size) {
     return NULL;
   }
