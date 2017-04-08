@@ -148,6 +148,11 @@ DEFINE_bool(malloc_disable_memory_release,
             " to return unused memory to the system.");
 
 // static allocators
+//SysAllocator是内存分配的接口
+
+// 这个接口由2个实现
+//SbrkSysAllocator.使用sbrk来分配内存
+//MmapSysAllocator.使用mmap来分配内存
 class SbrkSysAllocator : public SysAllocator {
 public:
   SbrkSysAllocator() : SysAllocator() {
@@ -177,6 +182,8 @@ public:
   void* Alloc(size_t size, size_t *actual_size, size_t alignment);
 };
 
+//SysAllocator需要实现一个接口void* Alloc(size_t size, size_t *actual_size, size_t alignment);
+//因为全局只是需要一个这样的对象， 所以这个对象可以静态分配即可.然后定义了一个DefaultSysAllocator允许设置Children. 
 class DefaultSysAllocator : public SysAllocator {
  public:
   DefaultSysAllocator() : SysAllocator() {
@@ -197,10 +204,10 @@ class DefaultSysAllocator : public SysAllocator {
   void* Alloc(size_t size, size_t *actual_size, size_t alignment);
 
  private:
-  static const int kMaxAllocators = 2;
-  bool failed_[kMaxAllocators];
-  SysAllocator* allocs_[kMaxAllocators];
-  const char* names_[kMaxAllocators];
+  static const int kMaxAllocators = 2; //最多2个分配器即sbrk和mmap
+  bool failed_[kMaxAllocators]; //分配器是否分配失败
+  SysAllocator* allocs_[kMaxAllocators];//两个分配器接口指针
+  const char* names_[kMaxAllocators]; //两个分配器名字
 };
 static union {
   char buf[sizeof(DefaultSysAllocator)];
@@ -438,6 +445,9 @@ void* DevMemSysAllocator::Alloc(size_t size, size_t *actual_size,
 #endif  // HAVE_MMAP
 }
 
+//实际操作时候都是先sbrk尝试先，然后使用mmap.DefaultAllocator按照children顺序尝试分配，也就意味着首先使用sbrk如果不成功尝试mmap 
+//系统里面所有使用的内存都是从这个地方分配的，包括thread_cache,page_allocator以及管理对象
+//因为会有多线程调用这个东西，所以在SystemAlloc之前的话会调用自选锁进行锁定。
 void* DefaultSysAllocator::Alloc(size_t size, size_t *actual_size,
                                  size_t alignment) {
   for (int i = 0; i < kMaxAllocators; i++) {
@@ -446,11 +456,13 @@ void* DefaultSysAllocator::Alloc(size_t size, size_t *actual_size,
       if (result != NULL) {
         return result;
       }
+      //如果没有分配成功，那么设置本次为true，接着尝试下个分配器
       failed_[i] = true;
     }
   }
   // After both failed, reset "failed_" to false so that a single failed
   // allocation won't make the allocator never work again.
+  //如果两个分配器都分配失败了，重置分配状态以便下次分配
   for (int i = 0; i < kMaxAllocators; i++) {
     failed_[i] = false;
   }
@@ -475,6 +487,7 @@ void InitSystemAllocators(void) {
   // likely to look like pointers and therefore the conservative gc in
   // the heap-checker is less likely to misinterpret a number as a
   // pointer).
+  //在初始化InitSystemAllocators的时候将sbrk_space以及mmap_space作为default_space的两个children. 
   DefaultSysAllocator *sdef = new (default_space.buf) DefaultSysAllocator();
   if (kDebugMode && sizeof(void*) > 4) {
     sdef->SetChildAllocator(mmap, 0, mmap_name);
@@ -507,6 +520,7 @@ void* TCMalloc_SystemAlloc(size_t size, size_t *actual_size,
     actual_size = &actual_size_storage;
   }
 
+  //因为会有多线程调用这个东西，所以在SystemAlloc之前的话会调用自选锁进行锁定。
   void* result = tcmalloc_sys_alloc->Alloc(size, actual_size, alignment);
   if (result != NULL) {
     CHECK_CONDITION(
