@@ -94,9 +94,9 @@ static const size_t kPageShift  = 13;
 static const size_t kNumClasses = kBaseClasses + 79;
 #endif
 
-static const size_t kMaxThreadCacheSize = 4 << 20;
+static const size_t kMaxThreadCacheSize = 4 << 20; // 4m
 
-static const size_t kPageSize   = 1 << kPageShift;
+static const size_t kPageSize   = 1 << kPageShift; 
 static const size_t kMaxSize    = 256 * 1024;
 static const size_t kAlignment  = 8;
 static const size_t kLargeSizeClass = 0;
@@ -192,7 +192,10 @@ class SizeMap {
   static const int kMaxSmallSize = 1024;
   static const size_t kClassArraySize =
       ((kMaxSize + 127 + (120 << 7)) >> 7) + 1;
-  unsigned char class_array_[kClassArraySize];
+  
+   //class_array_[kClassArraySize]表示了size到class的映射关系(size需要先经过函数ClassIndex(size)转换
+  unsigned char class_array_[kClassArraySize]; 
+ 
 
   static inline size_t SmallSizeClass(size_t s) {
     return (static_cast<uint32_t>(s) + 7) >> 3;
@@ -217,10 +220,13 @@ class SizeMap {
   int NumMoveSize(size_t size);
 
   // Mapping from size class to max size storable in that class
+  //class_to_size_[kNumClasses]表示了class到size的映射关系。
+  //要申请一个size的内存时，先从class_array_[ClassIndex(size)]查到size对应的sizeclass，
+  //然后从映射表class_to_size_[kNumClasses]获取实际获取的内存大小。
   size_t class_to_size_[kNumClasses];
 
   // Mapping from size class to number of pages to allocate at a time
-  size_t class_to_pages_[kNumClasses];
+  size_t class_to_pages_[kNumClasses]; //Central Cache每次从PageHeap获取内存时，对应的sizeclass每次需要从PageHeap获取几页内存
 
  public:
   // Constructor should do nothing since we rely on explicit Init()
