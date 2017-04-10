@@ -69,9 +69,9 @@ void* TCMalloc_SystemAlloc(size_t bytes, size_t *actual_bytes,
 // the OS.  The benefit of this function is that it frees memory for
 // use by the system, the cost is that the pages are faulted back into
 // the address space next time they are touched, which can impact
-// performance.  (Only pages fully covered by the memory region will
-// be released, partial pages will not.)
-//
+// performance.  
+//(Only pages fully covered by the memory region will be released, partial pages will not.)
+//即会将start地址round up到pagesize的大小，会将end地址round down到pagesize的大小，这样仅仅释放start,end之间的page
 // Returns false if release failed or not supported.
 extern PERFTOOLS_DLL_DECL
 bool TCMalloc_SystemRelease(void* start, size_t length);
