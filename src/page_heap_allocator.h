@@ -62,10 +62,12 @@ class PageHeapAllocator {
   T* New() {
     // Consult free list
     void* result;
+    //先从free_list拿对象，如果free_list不为空，那么拿走
     if (free_list_ != NULL) {
       result = free_list_;
       free_list_ = *(reinterpret_cast<void**>(result));
     } else {
+      //如果此时空闲内存卡大小小于T对象的大小，那么要申请一块新的内存块来赋给free_area
       if (free_avail_ < sizeof(T)) {
         // Need more room. We assume that MetaDataAlloc returns
         // suitably aligned memory.
@@ -76,16 +78,19 @@ class PageHeapAllocator {
               "tcmalloc data (bytes, object-size)",
               kAllocIncrement, sizeof(T));
         }
+       //赋值新分配内存块的大小
         free_avail_ = kAllocIncrement;
       }
+     //从空闲内存块移去T对象需要的大小
       result = free_area_;
-      free_area_ += sizeof(T);
-      free_avail_ -= sizeof(T);
+      free_area_ += sizeof(T); //剩余的空闲内存块地址，向后移动T对象大小
+      free_avail_ -= sizeof(T); //剩余空闲内存块大小还有多少
     }
-    inuse_++;
+    inuse_++; //又分配出去一个T对象
     return reinterpret_cast<T*>(result);
   }
 
+ //删除T对象，回收这块内存，这块内存赋值给free_list
   void Delete(T* p) {
     *(reinterpret_cast<void**>(p)) = free_list_;
     free_list_ = p;
@@ -96,14 +101,14 @@ class PageHeapAllocator {
 
  private:
   // How much to allocate from system at a time
-  static const int kAllocIncrement = 128 << 10;
+  static const int kAllocIncrement = 128 << 10; //128k大小
 
   // Free area from which to carve new objects
-  char* free_area_;
-  size_t free_avail_;
+  char* free_area_; //空闲内存块起始地址
+  size_t free_avail_;//空闲内存块大小
 
   // Free list of already carved objects
-  void* free_list_;
+  void* free_list_; //已回收的空闲对象（仅指向一个回收的T对象地址）
 
   // Number of allocated but unfreed objects
   int inuse_;
