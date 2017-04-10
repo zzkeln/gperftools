@@ -39,6 +39,9 @@
 
 #ifndef TCMALLOC_TCMALLOC_GUARD_H_
 #define TCMALLOC_TCMALLOC_GUARD_H_
+//TCMallocGuard主要是为了确保在tc_malloc之前所有静态变量都已经完成了初始化。
+//首先全局存在一个static TCMallocGuard module_enter_exit_hook; 
+//这个变量来确保静态初始化，但是同时为了防止重复初始化还加了引用计数进行判断 
 
 class TCMallocGuard {
  public:
