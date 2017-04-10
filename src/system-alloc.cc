@@ -217,6 +217,7 @@ static const char sbrk_name[] = "SbrkSysAllocator";
 static const char mmap_name[] = "MmapSysAllocator";
 
 
+//调用sbrk来分配内存，注意要按照alignment对齐，即可能多分配一些内存而且首地址要保证对齐
 void* SbrkSysAllocator::Alloc(size_t size, size_t *actual_size,
                               size_t alignment) {
 #if !defined(HAVE_SBRK) || defined(__UCLIBC__)
@@ -288,6 +289,7 @@ void* SbrkSysAllocator::Alloc(size_t size, size_t *actual_size,
 #endif  // HAVE_SBRK
 }
 
+//使用mmap来分配一段内存，分配的大小要按照alignment重新计算，而且分配的首地址也要按照alignment来对齐
 void* MmapSysAllocator::Alloc(size_t size, size_t *actual_size,
                               size_t alignment) {
 #ifndef HAVE_MMAP
@@ -308,7 +310,7 @@ void* MmapSysAllocator::Alloc(size_t size, size_t *actual_size,
   if (alignment < pagesize) alignment = pagesize;
   //将aligned_size round-up为alignment的倍数
   size_t aligned_size = ((size + alignment - 1) / alignment) * alignment;
-  //impossiblely happen?
+  //如果aligned_size即按照alignment分配的内存大小溢出了，那么会小于size，这样直接返回
   if (aligned_size < size) {
     return NULL;
   }
@@ -316,6 +318,7 @@ void* MmapSysAllocator::Alloc(size_t size, size_t *actual_size,
 
   // "actual_size" indicates that the bytes from the returned pointer
   // p up to and including (p + actual_size - 1) have been allocated.
+  //设置实际分配的内存大小：按照algnment对齐后的地址
   if (actual_size) {
     *actual_size = size;
   }
@@ -341,18 +344,22 @@ void* MmapSysAllocator::Alloc(size_t size, size_t *actual_size,
   // Adjust the return memory so it is aligned
   uintptr_t ptr = reinterpret_cast<uintptr_t>(result);
   size_t adjust = 0;
+  //起始地址要是alignment的倍数，adjust是起始地址需要补齐的大小即起始地址需要往后移动多少来成为alignment的倍数
   if ((ptr & (alignment - 1)) != 0) {
     adjust = alignment - (ptr & (alignment - 1));
   }
 
   // Return the unused memory to the system
+  //adjust是mmap返回的起始地址需要偏移的大小，这个大小可以返回给os，即分配的内存段的首部空间有冗余返回给操作系统
   if (adjust > 0) {
     munmap(reinterpret_cast<void*>(ptr), adjust);
   }
+  //分配的内存段的尾部空间有冗余，返回给操作系统
   if (adjust < extra) {
     munmap(reinterpret_cast<void*>(ptr + adjust + size), extra - adjust);
   }
 
+  //调整首地址保证按alignment对齐
   ptr += adjust;
   return reinterpret_cast<void*>(ptr);
 #endif  // HAVE_MMAP
@@ -505,10 +512,13 @@ void InitSystemAllocators(void) {
 void* TCMalloc_SystemAlloc(size_t size, size_t *actual_size,
                            size_t alignment) {
   // Discard requests that overflow
+  //都是size_t即无符号整型，如果size+alignment溢出了，那么会小于size
   if (size + alignment < size) return NULL;
 
+  //可能多线程会调用systemAlloc，拿住自旋锁
   SpinLockHolder lock_holder(&spinlock);
 
+  //已经初始化过了？如果没，那么初始下，已拿住自旋锁故没问题
   if (!system_alloc_inited) {
     InitSystemAllocators();
     system_alloc_inited = true;
@@ -528,6 +538,7 @@ void* TCMalloc_SystemAlloc(size_t size, size_t *actual_size,
     CHECK_CONDITION(
       CheckAddressBits<kAddressBits>(
         reinterpret_cast<uintptr_t>(result) + *actual_size - 1));
+    //记录已分配了多少内存
     TCMalloc_SystemTaken += *actual_size;
   }
   return result;
@@ -542,7 +553,8 @@ bool TCMalloc_SystemRelease(void* start, size_t length) {
   }
   if (FLAGS_malloc_disable_memory_release) return false;
   if (pagesize == 0) pagesize = getpagesize();
-  const size_t pagemask = pagesize - 1;
+  //这个不错！
+  const size_t pagemask = pagesize - 1; 
 
   size_t new_start = reinterpret_cast<size_t>(start);
   size_t end = new_start + length;
@@ -550,6 +562,8 @@ bool TCMalloc_SystemRelease(void* start, size_t length) {
 
   // Round up the starting address and round down the ending address
   // to be page aligned:
+  //将news_start round up到pagesize对齐的
+  //级那个news_end round down到pagesize对齐的
   new_start = (new_start + pagesize - 1) & ~pagemask;
   new_end = new_end & ~pagemask;
 
