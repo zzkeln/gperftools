@@ -43,6 +43,8 @@ namespace tcmalloc {
 
 // Simple allocator for objects of a specified type.  External locking
 // is required before accessing one of these objects.
+//简单的内存分配器，分配固定对象的内存。如果内存不够那么从系统中申请一块大的然后切割出去。
+//回收内存后放入free_list中
 template <class T>
 class PageHeapAllocator {
  public:
@@ -119,8 +121,8 @@ class PageHeapAllocator {
   // Free list of already carved objects
  /*
  注意这里仅仅用一个free_list就像空闲节点给串联起一个单链表，free_list指向表头。具体思想时，返回的内存节点T*p，其中p执行的T对象都是空闲的
- 可以把它的内容当作next来使用，存放下一个节点的地址，这样就串联为一个单链表。这个void* free_list类似于struct T {T* next}；然后free_list是
- 表头
+ 可以把它的内容当作next来使用，存放下一个节点的地址，这样就串联为一个单链表。这个void* free_list类似于struct T {T* next} 即链表节点的内容仅仅存储
+ 下个节点的地址；然后free_list是表头
  example:T是int，那么free_list就是一系列int*串联起来的单链表的头节点。当delete(int* p)时，将p指向的int内存存放free_list地址即当前链表首地址
  然后更新free_list=p，这样free_list指向单链表的头节点的地址，头节点的内容中存放下个节点的地址（返回内存是空闲的，所以头节点的内存中被利用起来了，
  当作next指针来使用）
