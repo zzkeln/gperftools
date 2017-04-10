@@ -999,7 +999,7 @@ TCMallocGuard::TCMallocGuard() {
   if (tcmallocguard_refcount++ == 0) {
     ReplaceSystemAlloc();    // defined in libc_override_*.h
     tc_free(tc_malloc(1));
-    ThreadCache::InitTSD();
+    ThreadCache::InitTSD();//初始化一下tc的线程局部变量
     tc_free(tc_malloc(1));
     // Either we, or debugallocation.cc, or valgrind will control memory
     // management.  We register our extension if we're the winner.
@@ -1016,6 +1016,7 @@ TCMallocGuard::TCMallocGuard() {
 }
 
 TCMallocGuard::~TCMallocGuard() {
+  //如果引用计数为0的话，可以根据环境变量来选择是否打印统计信息 
   if (--tcmallocguard_refcount == 0) {
     const char* env = NULL;
     if (!RunningOnValgrind()) {
