@@ -44,7 +44,12 @@ namespace tcmalloc {
 // Simple allocator for objects of a specified type.  External locking
 // is required before accessing one of these objects.
 //简单的内存分配器，分配固定对象的内存。如果内存不够那么从系统中申请一块大的然后切割出去。
-//回收内存后放入free_list中
+//回收内存后放入free_list中。回收缓存起来挂在free_list上面，分配首先从free_list尝试分配， 
+//如果free_list为空的话，那么久会调用全局内存分配。 
+/*
+需要注意的是每一个节点肯定都是>sizeof(void*)的， 所以每个节点不用分配额外的next指针空间，
+仅仅使用节点本身来存储next内容即存储下个节点的地址，这个是一个基本上所以写过内存分配器程序员公开的技巧了
+*/
 template <class T>
 class PageHeapAllocator {
  public:
