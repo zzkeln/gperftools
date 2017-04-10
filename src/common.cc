@@ -229,6 +229,7 @@ static size_t metadata_chunk_avail_;
 
 static SpinLock metadata_alloc_lock(SpinLock::LINKER_INITIALIZED);
 
+//从系统分配一块内存
 void* MetaDataAlloc(size_t bytes) {
   if (bytes >= kMetadataAllocChunkSize) {
     void *rv = TCMalloc_SystemAlloc(bytes,
