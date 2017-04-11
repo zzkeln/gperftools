@@ -107,6 +107,7 @@ class CentralFreeList {
   // TransferCache is used to cache transfers of
   // sizemap.num_objects_to_move(size_class) back and forth between
   // thread caches and the central cache for a given size class.
+  // transfer_cache用来将thread_cache和central_freelist之间移动的object cache住
   struct TCEntry {
     void *head;  // Head of chain of objects.
     void *tail;  // Tail of chain of objects.
@@ -177,7 +178,7 @@ class CentralFreeList {
   SpinLock lock_;
 
   // We keep linked lists of empty and non-empty spans.
-  size_t   size_class_;     // My size class
+  size_t   size_class_;     // My size class 当前central_freelist对应的sizeclass
   Span     empty_;          // Dummy header for list of empty spans，empty span链表的表头
   Span     nonempty_;       // Dummy header for list of non-empty spans，non-empty span链表的表头
   size_t   num_spans_;      // Number of spans in empty_ plus nonempty_, span对象的个数
