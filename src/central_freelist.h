@@ -54,30 +54,36 @@ class CentralFreeList {
   // lock_ state.
   CentralFreeList() : lock_(base::LINKER_INITIALIZED) { }
 
+  // 初始化,cl表示自己是第几个class
   void Init(size_t cl);
 
   // These methods all do internal locking.
 
   // Insert the specified range into the central freelist.  N is the number of
   // elements in the range.  RemoveRange() is the opposite operation.
+  // 回收部分objects.
   void InsertRange(void *start, void *end, int N);
 
   // Returns the actual number of fetched elements and sets *start and *end.
+  // 分配部分objects.
   int RemoveRange(void **start, void **end, int N);
 
   // Returns the number of free objects in cache.
+  // 在cache里面存在多少个free objects(不包含transfer cache)
   int length() {
     SpinLockHolder h(&lock_);
     return counter_;
   }
 
   // Returns the number of free objects in the transfer cache.
+  // transfer cache里面包含多少free objects.
   int tc_length();
 
   // Returns the memory overhead (internal fragmentation) attributable
   // to the freelist.  This is memory lost when the size of elements
   // in a freelist doesn't exactly divide the page-size (an 8192-byte
   // page full of 5-byte objects would have 2 bytes memory overhead).
+  // 因为内部碎片造成的额外开销
   size_t OverheadBytes();
 
   // Lock/Unlock the internal SpinLock. Used on the pthread_atfork call
@@ -165,10 +171,10 @@ class CentralFreeList {
 
   // We keep linked lists of empty and non-empty spans.
   size_t   size_class_;     // My size class
-  Span     empty_;          // Dummy header for list of empty spans
-  Span     nonempty_;       // Dummy header for list of non-empty spans
-  size_t   num_spans_;      // Number of spans in empty_ plus nonempty_
-  size_t   counter_;        // Number of free objects in cache entry
+  Span     empty_;          // Dummy header for list of empty spans，empty span链表的表头
+  Span     nonempty_;       // Dummy header for list of non-empty spans，non-empty span链表的表头
+  size_t   num_spans_;      // Number of spans in empty_ plus nonempty_, span对象的个数
+  size_t   counter_;        // Number of free objects in cache entry， tc_slots中的object数目
 
   // Here we reserve space for TCEntry cache slots.  Space is preallocated
   // for the largest possible number of entries than any one size class may
@@ -179,13 +185,13 @@ class CentralFreeList {
 
   // Number of currently used cached entries in tc_slots_.  This variable is
   // updated under a lock but can be read without one.
-  int32_t used_slots_;
+  int32_t used_slots_; //当前使用的tc_entries
   // The current number of slots for this size class.  This is an
   // adaptive value that is increased if there is lots of traffic
   // on a given size class.
-  int32_t cache_size_;
+  int32_t cache_size_; //当前允许的最大的tc entries.
   // Maximum size of the cache for a given size class.
-  int32_t max_cache_size_;
+  int32_t max_cache_size_;// 最大允许多少个tc entries.
 };
 
 // Pads each CentralCache object to multiple of 64 bytes.  Since some
@@ -202,6 +208,7 @@ template<>
 class CentralFreeListPaddedTo<0> : public CentralFreeList {
 };
 
+//这个类是占用一定的内存，来使得补齐64字节的倍数
 class CentralFreeListPadded : public CentralFreeListPaddedTo<
   sizeof(CentralFreeList) % 64> {
 };
