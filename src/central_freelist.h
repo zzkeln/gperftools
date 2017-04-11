@@ -216,6 +216,7 @@ class CentralFreeListPaddedTo<0> : public CentralFreeList {
 };
 
 //这个类是占用一定的内存，来使得补齐64字节的倍数
+//CentralFreeListPadded Static::central_cache_[kNumClasses];
 class CentralFreeListPadded : public CentralFreeListPaddedTo<
   sizeof(CentralFreeList) % 64> {
 };
