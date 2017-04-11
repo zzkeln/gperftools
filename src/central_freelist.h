@@ -49,11 +49,12 @@ namespace tcmalloc {
  /*
  central cache是所有线程共享的缓冲区，因此对central cache的访问需要加锁。
  central cache所有的数据都在Static::central_cache_ [kNumClasses]中，即采用数组的方式来管理所有的cache，每个sizeclass
- 的central cache对应一个数组元素，所以对不同sizeclass的central cache的访问是不冲突的，对ache挂到管理主要由类CentralFreeList来实现。
+ 的central cache对应一个数组元素，所以对不同sizeclass的central cache的访问是不冲突的，对cache的管理主要由类CentralFreeList来实现。
  CentralFreeListPadded Static::central_cache_[kNumClasses];
  */
  
 // Data kept per size-class in central cache.
+//每个sizeclass对应一个CentralFreeList，由init函数来设置sizeclass
 class CentralFreeList {
  public:
   // A CentralFreeList may be used before its constructor runs.
@@ -68,11 +69,11 @@ class CentralFreeList {
 
   // Insert the specified range into the central freelist.  N is the number of
   // elements in the range.  RemoveRange() is the opposite operation.
-  // 回收部分objects.
+  // 回收部分N个object,优先放入tc中
   void InsertRange(void *start, void *end, int N);
 
   // Returns the actual number of fetched elements and sets *start and *end.
-  // 分配部分objects.
+  // 分配N个object, start和end是输出参数
   int RemoveRange(void **start, void **end, int N);
 
   // Returns the number of free objects in cache.
@@ -107,7 +108,8 @@ class CentralFreeList {
   // TransferCache is used to cache transfers of
   // sizemap.num_objects_to_move(size_class) back and forth between
   // thread caches and the central cache for a given size class.
-  // transfer_cache用来将thread_cache和central_freelist之间移动的object cache住
+  // transfer_cache用来cache住thread_cache和central_freelist之间移动的object。
+  //thread_cache将N个object返回给central_freelist时，会占用一个slot，且设置head和tail为返还内存的起始和结尾地址
   struct TCEntry {
     void *head;  // Head of chain of objects.
     void *tail;  // Tail of chain of objects.
@@ -128,12 +130,16 @@ class CentralFreeList {
   // REQUIRES: lock_ is held
   // Remove object from cache and return.
   // Return NULL if no free entries in cache.
+  //从non-empty链表的首节点分配一定数目（争取分配N个）的object出去，返回分配的数目
   int FetchFromOneSpans(int N, void **start, void **end) EXCLUSIVE_LOCKS_REQUIRED(lock_);
 
   // REQUIRES: lock_ is held
   // Remove object from cache and return.  Fetches
   // from pageheap if cache is empty.  Only returns
   // NULL on allocation failure.
+ //争取分配N个object的内存，如果当前central_freelist中不存在任何object(即non-empty链表为空)，
+ //那么从os分配一定的pages然后进行划分为多个object
+ //加入non-empty span链表中
   int FetchFromOneSpansSafe(int N, void **start, void **end) EXCLUSIVE_LOCKS_REQUIRED(lock_);
 
   // REQUIRES: lock_ is held
@@ -149,6 +155,7 @@ class CentralFreeList {
   // REQUIRES: lock_ is held
   // Populate cache by fetching from the page heap.
   // May temporarily release lock_.
+  //从系统申请一定的page过来，然后划分为多个object，作为一个span节点加入non-empty链表中
   void Populate() EXCLUSIVE_LOCKS_REQUIRED(lock_);
 
   // REQUIRES: lock is held.
