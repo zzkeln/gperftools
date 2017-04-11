@@ -88,20 +88,30 @@ static const size_t kPageShift  = 15;
 static const size_t kNumClasses = kBaseClasses + 69;
 #elif defined(TCMALLOC_64K_PAGES)
 static const size_t kPageShift  = 16;
-static const size_t kNumClasses = kBaseClasses + 73;
+static const size_t kNumClasses = kBaseClasses + 73; 
 #else
 static const size_t kPageShift  = 13;
 static const size_t kNumClasses = kBaseClasses + 79;
 #endif
 
-static const size_t kMaxThreadCacheSize = 4 << 20; // 4m
+/*
+static const size_t kPageShift  = 13;
+static const size_t kPageSize   = 1 << kPageShift; //页大小-8k
+static const size_t kMaxSize    = 256 * 1024; //最大的小内存-256k
+static const size_t kAlignment  = 8; //8字节对齐
+static const size_t kNumClasses = 86;
+static const int kMaxSmallSize = 1024;
+static const size_t kClassArraySize = ((kMaxSize + 127 + (120 << 7)) >> 7) + 1;
+*/
 
-static const size_t kPageSize   = 1 << kPageShift; 
-static const size_t kMaxSize    = 256 * 1024;
-static const size_t kAlignment  = 8;
+static const size_t kMaxThreadCacheSize = 4 << 20; // 4MB
+
+static const size_t kPageSize   = 1 << kPageShift; //8k
+static const size_t kMaxSize    = 256 * 1024; // 256K
+static const size_t kAlignment  = 8; // 8字节对齐
 static const size_t kLargeSizeClass = 0;
 // For all span-lengths < kMaxPages we keep an exact-size list.
-static const size_t kMaxPages = 1 << (20 - kPageShift);
+static const size_t kMaxPages = 1 << (20 - kPageShift);//128
 
 // Default bound on the total amount of thread caches.
 #ifdef TCMALLOC_SMALL_BUT_SLOW
@@ -155,8 +165,34 @@ inline Length pages(size_t bytes) {
 
 // For larger allocation sizes, we use larger memory alignments to
 // reduce the number of size classes.
+//对于size，返回分配的内存对齐的大小
 int AlignmentForSize(size_t size);
 
+/*
+小内存的分配策略就全部出来啦，一起走一遍分配流程：
+首先通过用户申请的size(<=256k)使用ClassIndex算出的index1，
+再通过在class_array_中index1的位置找到这个size对应的分配策略索引index2，
+index2就是剩下的三个数组的索引，举个例子：
+假如申请168字节的内存，首先通过ClassIndex算出index1=21，
+然后通过classarray[21]得到index2=12，通过index2在三个数组中依次得到176，32，1，
+代表的意思就是thread_cache从每个节点大小为176（下标索引为12）的链表中取出一个返回给用户，
+如果thread_cache不够，需要从central_freelist[12]中取，则每次取32个大小为176字节的块，
+如果central_freelist[12]也不够,则向page_heap申请1页并把1页按照176字节为单位切分成块，
+返回32个给thread_cache，好了，总结：
+
+    用户向thread_cache申请168字节
+
+    假设此时thread_cache为空，通过查表，得知168字节的申请应该向对应176字节的central_freelist[12]申请，并且每次申请32个object（每个176字节）
+
+    假设此时central_freelist[12]也为空，通过查表，得知自己每次应该向page_heap申请1页，也就是8K，
+    然后把8K分成以176字节为单位的块，并且返回32个块给thread_cache,剩下的留着备用
+
+    thread_cache从central_freelist拿到了32个object，把其中一个返回给用户，剩下的31个留着备用
+    
+    大内存的分配不走thread_cache和central_freelist，直接从page_heap申请，这个比较简单
+*/
+  
+  
 // Size-class information + mapping
 class SizeMap {
  private:
@@ -165,6 +201,7 @@ class SizeMap {
   // amortize the lock overhead for accessing the central list.  Making
   // it too big may temporarily cause unnecessary memory wastage in the
   // per-thread free list until the scavenger cleans up the list.
+  //central_freelist用的，用来查每次给对应thread_cache分配多少个object
   int num_objects_to_move_[kNumClasses];
 
   //-------------------------------------------------------------------
@@ -194,6 +231,12 @@ class SizeMap {
       ((kMaxSize + 127 + (120 << 7)) >> 7) + 1;
   
    //class_array_[kClassArraySize]表示了size到class的映射关系(size需要先经过函数ClassIndex(size)转换
+  /*
+  分配策略已经压缩在86种，可是用户传过来的值怎么映射到这86种呢，
+  每一个用户申请的size(<=256k)通过ClassIndex(size)都会算出一个值，这些值的范围是0~2168, ClassIndex算法如下，
+  大致就是<=1024字节的按照8字节对齐，>1024字节的按照128字节对齐，
+  所以256k一共有2169种，TCMalloc通过class_array_来保存着2169中索引向86种策略的映射
+  */
   unsigned char class_array_[kClassArraySize]; 
  
 
@@ -223,11 +266,13 @@ class SizeMap {
   //class_to_size_[kNumClasses]表示了class到size的映射关系。
   //要申请一个size的内存时，先从class_array_[ClassIndex(size)]查到size对应的sizeclass，
   //然后从映射表class_to_size_[kNumClasses]获取实际获取的内存大小。
+  //thread_cache使用，用来查实际给该用户多大的内存
   size_t class_to_size_[kNumClasses];
 
   // Mapping from size class to number of pages to allocate at a time
-  size_t class_to_pages_[kNumClasses]; //Central Cache每次从PageHeap获取内存时，对应的sizeclass每次需要从PageHeap获取几页内存
-
+  //class_to_pages_是page_heap用的，用来查每次给不同central_freelist分多少个页
+  size_t class_to_pages_[kNumClasses]; 
+  
  public:
   // Constructor should do nothing since we rely on explicit Init()
   // call, which may or may not be called before the constructor runs.
