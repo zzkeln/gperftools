@@ -42,13 +42,14 @@
 namespace tcmalloc {
 
 // Information kept for a span (a contiguous run of pages).
+//Span对象表示连续的几个页面pages
 struct Span {
-  PageID        start;          // Starting page number
-  Length        length;         // Number of pages in span
-  Span*         next;           // Used when in link list
+  PageID        start;          // Starting page number：由Span描述的内存起始地址，PageID的类型是uintptr_t
+  Length        length;         // Number of pages in span Span页面的数量，Length的类型也是uintptr_t。
+  Span*         next;           // Used when in link list Span *next和Span *prev是Span的指针，当Span位于PageHeap的free list双向链表中。
   Span*         prev;           // Used when in link list
   void*         objects;        // Linked list of free objects
-  unsigned int  refcount : 16;  // Number of non-free objects
+  unsigned int  refcount : 16;  // Number of non-free objects 
   unsigned int  sizeclass : 8;  // Size-class for small objects (or 0)
   unsigned int  location : 2;   // Is the span on a freelist, and if so, which?
   unsigned int  sample : 1;     // Sampled object?
@@ -72,6 +73,7 @@ void Event(Span* span, char op, int v = 0);
 #endif
 
 // Allocator/deallocator for spans
+//allocator是PageHeapAllocator<Span> Static::span_allocator_;即固定对象的内存分配器
 Span* NewSpan(PageID p, Length len);
 void DeleteSpan(Span* span);
 
@@ -80,23 +82,29 @@ void DeleteSpan(Span* span);
 // -------------------------------------------------------------------------
 
 // Initialize *list to an empty list.
+//初始化一个双向链表，list是表头
 void DLL_Init(Span* list);
 
 // Remove 'span' from the linked list in which it resides, updating the
 // pointers of adjacent Spans and setting span's next and prev to NULL.
+//从span所在的双向链表中移除span这个节点
 void DLL_Remove(Span* span);
 
 // Return true iff "list" is empty.
+//判断list是否为空（如果next指向自己那么肯定为空）
 inline bool DLL_IsEmpty(const Span* list) {
   return list->next == list;
 }
 
 // Add span to the front of list.
+//将span这个节点插入list双向链表的最前面
 void DLL_Prepend(Span* list, Span* span);
 
 // Return the length of the linked list. O(n)
+//返回这个双向链表中节点个数，需要遍历链表
 int DLL_Length(const Span* list);
 
 }  // namespace tcmalloc
 
 #endif  // TCMALLOC_SPAN_H_
+S
