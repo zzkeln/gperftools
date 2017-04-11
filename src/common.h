@@ -158,6 +158,7 @@ namespace tcmalloc {
 
 // Convert byte size into pages.  This won't overflow, but may return
 // an unreasonably large value if bytes is huge enough.
+//bytes大小的内存需要多少page，这里没用除法和余数，仅仅用了移位和与操作，速度较快！
 inline Length pages(size_t bytes) {
   return (bytes >> kPageShift) +
       ((bytes & (kPageSize - 1)) > 0 ? 1 : 0);
@@ -201,7 +202,9 @@ class SizeMap {
   // amortize the lock overhead for accessing the central list.  Making
   // it too big may temporarily cause unnecessary memory wastage in the
   // per-thread free list until the scavenger cleans up the list.
-  //central_freelist用的，用来查每次给对应thread_cache分配多少个object
+  //central_freelist用的，用来查每次给对应thread_cache分配多少个object。即某个size在thread_cache没有了，那么thread_cache向
+  //central_freelist申请时，central_freelist返回给thread_cache多少个这样size的内存块
+  //centrail_freelist--->thread_cache
   int num_objects_to_move_[kNumClasses];
 
   //-------------------------------------------------------------------
@@ -249,6 +252,7 @@ class SizeMap {
   }
 
   // Compute index of the class_array[] entry for a given size
+  //对于某个size s，算出在class_array的index，然后根据class_array_[index]得出第二个index作为class_to_size和其它两个array的index。
   static inline size_t ClassIndex(size_t s) {
     // Use unsigned arithmetic to avoid unnecessary sign extensions.
     ASSERT(0 <= s);
@@ -267,10 +271,12 @@ class SizeMap {
   //要申请一个size的内存时，先从class_array_[ClassIndex(size)]查到size对应的sizeclass，
   //然后从映射表class_to_size_[kNumClasses]获取实际获取的内存大小。
   //thread_cache使用，用来查实际给该用户多大的内存
+  //thread_cache--->user
   size_t class_to_size_[kNumClasses];
 
   // Mapping from size class to number of pages to allocate at a time
   //class_to_pages_是page_heap用的，用来查每次给不同central_freelist分多少个页
+  //page-heap---->central_freelist
   size_t class_to_pages_[kNumClasses]; 
   
  public:
@@ -281,6 +287,7 @@ class SizeMap {
   // Initialize the mapping arrays
   void Init();
 
+  //对于一个size，返回第二个index，用于查询那三个数组(class_to_size, class_to_pages)
   inline int SizeClass(size_t size) {
     return class_array_[ClassIndex(size)];
   }
@@ -309,6 +316,7 @@ class SizeMap {
   }
 
   // Mapping from size class to number of pages to allocate at a time
+  //这个class对应的pages的个数
   inline size_t class_to_pages(size_t cl) {
     return class_to_pages_[cl];
   }
@@ -318,6 +326,7 @@ class SizeMap {
   // amortize the lock overhead for accessing the central list.  Making
   // it too big may temporarily cause unnecessary memory wastage in the
   // per-thread free list until the scavenger cleans up the list.
+  //这个class对应的central_freelist到thread_cache的个数
   inline int num_objects_to_move(size_t cl) {
     return num_objects_to_move_[cl];
   }
