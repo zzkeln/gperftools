@@ -74,11 +74,14 @@ static inline int LgFloor(size_t n) {
   return log;
 }
 
+//对于size，返回对齐的大小
 int AlignmentForSize(size_t size) {
-  int alignment = kAlignment;
-  if (size > kMaxSize) {
+  int alignment = kAlignment;//=8
+  //如果size>256k，那么按照page size来对齐即按照8k对齐
+  if (size > kMaxSize) { 
     // Cap alignment at kPageSize for large sizes.
     alignment = kPageSize;
+  //如果128k<=size<256k，那么取lg来对齐
   } else if (size >= 128) {
     // Space wasted due to alignment is at most 1/8, i.e., 12.5%.
     alignment = (1 << LgFloor(size)) / 8;
@@ -88,11 +91,12 @@ int AlignmentForSize(size_t size) {
     alignment = kMinAlign;
   }
   // Maximum alignment allowed is page size alignment.
+  //最大的对齐大小就是页大小，一般是8k
   if (alignment > kPageSize) {
     alignment = kPageSize;
   }
   CHECK_CONDITION(size < kMinAlign || alignment >= kMinAlign);
-  CHECK_CONDITION((alignment & (alignment - 1)) == 0);
+  CHECK_CONDITION((alignment & (alignment - 1)) == 0); //alignment是2^n
   return alignment;
 }
 
