@@ -123,6 +123,7 @@ int SizeMap::NumMoveSize(size_t size) {
 }
 
 // Initialize the mapping arrays
+//初始化几个mapping arrays，包括class_arrays_, class_sizes_, class_pages_, num_objects_to_move
 void SizeMap::Init() {
   InitTCMallocTransferNumObjects();
 
@@ -223,7 +224,7 @@ void SizeMap::Init() {
 
 // Metadata allocator -- keeps stats about how many bytes allocated.
 static uint64_t metadata_system_bytes_ = 0;
-static const size_t kMetadataAllocChunkSize = 8*1024*1024;
+static const size_t kMetadataAllocChunkSize = 8*1024*1024; // 8M
 // As ThreadCache objects are allocated with MetaDataAlloc, and also
 // CACHELINE_ALIGNED, we must use the same alignment as TCMalloc_SystemAlloc.
 static const size_t kMetadataAllignment = sizeof(MemoryAligner);
