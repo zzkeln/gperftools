@@ -46,6 +46,13 @@
 
 namespace tcmalloc {
 
+ /*
+ central cache是所有线程共享的缓冲区，因此对central cache的访问需要加锁。
+ central cache所有的数据都在Static::central_cache_ [kNumClasses]中，即采用数组的方式来管理所有的cache，每个sizeclass
+ 的central cache对应一个数组元素，所以对不同sizeclass的central cache的访问是不冲突的，对ache挂到管理主要由类CentralFreeList来实现。
+ CentralFreeListPadded Static::central_cache_[kNumClasses];
+ */
+ 
 // Data kept per size-class in central cache.
 class CentralFreeList {
  public:
