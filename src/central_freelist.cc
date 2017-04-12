@@ -102,6 +102,7 @@ Span* MapObjectToSpan(void* object) {
   return span;
 }
 
+//将这个object返回给span，如果span的object都回收回来了，那么会释放这个span即从central_freelist--->page_heap
 void CentralFreeList::ReleaseToSpans(void* object) {
   /*
   这里有一个最重要的问题就是MapObjectToSpan,object是如何映射到span的。这里我们首先可以大致说一下， 就是tcmalloc因为是按照page来分配的，
@@ -206,6 +207,7 @@ class LockInverter {
 // This function is marked as NO_THREAD_SAFETY_ANALYSIS because it uses
 // LockInverter to release one lock and acquire another in scoped-lock
 // style, which our current annotation/analysis does not support.
+//尝试将一个tc里的slot的object返还给span，空闲出一个slot
 bool CentralFreeList::ShrinkCache(int locked_size_class, bool force)
     NO_THREAD_SAFETY_ANALYSIS {
   // Start with a quick check without taking a lock.
@@ -388,7 +390,7 @@ void CentralFreeList::Populate() {
   counter_ += num;
 }
 
-//返回被transfre-cache所保存的object数目
+//返回被transfre-cache所保存的object数目，当前slot数目*每个slot存储的object个数（这个个数是thread_cache-->central_freelist的object个数）
 int CentralFreeList::tc_length() {
   SpinLockHolder h(&lock_);
   return used_slots_ * Static::sizemap()->num_objects_to_move(size_class_);
