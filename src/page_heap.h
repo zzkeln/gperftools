@@ -108,18 +108,18 @@ class PERFTOOLS_DLL_DECL PageHeap {
   // Allocate a run of "n" pages.  Returns zero if out of memory.
   // Caller should not pass "n == 0" -- instead, n should have
   // been rounded up already.
-  Span* New(Length n);
+  Span* New(Length n);// 分配n个pages并且返回Span对象
 
   // Delete the span "[p, p+n-1]".
   // REQUIRES: span was returned by earlier call to New() and
   //           has not yet been deleted.
-  void Delete(Span* span);
+  void Delete(Span* span); // 删除Span对象管理的内存
 
   // Mark an allocated span as being used for small objects of the
   // specified size-class.
   // REQUIRES: span was returned by an earlier call to New()
   //           and has not yet been deleted.
-  void RegisterSizeClass(Span* span, size_t sc);
+  void RegisterSizeClass(Span* span, size_t sc);// 注册这个span对象管理的slab大小多少(0表示不是用于分配小内存)
 
   // Split an allocated span into two spans: one of length "n" pages
   // followed by another span of length "span->length - n" pages.
@@ -129,17 +129,17 @@ class PERFTOOLS_DLL_DECL PageHeap {
   // REQUIRES: "0 < n < span->length"
   // REQUIRES: span->location == IN_USE
   // REQUIRES: span->sizeclass == 0
-  Span* Split(Span* span, Length n);
+  Span* Split(Span* span, Length n); // 将当前的span切分，一个管理n个页面的span,一个是剩余的。
 
   // Return the descriptor for the specified page.  Returns NULL if
   // this PageID was not allocated previously.
-  inline Span* GetDescriptor(PageID p) const {
+  inline Span* GetDescriptor(PageID p) const { //根据PageID得到管理这个Page的Span对象
     return reinterpret_cast<Span*>(pagemap_.get(p));
   }
 
   // If this page heap is managing a range with starting page # >= start,
   // store info about the range in *r and return true.  Else return false.
-  bool GetNextRange(PageID start, base::MallocRange* r);
+  bool GetNextRange(PageID start, base::MallocRange* r); / 如果page heap管理了>=start的span,那么返回这个信息
 
   // Page heap statistics
   struct Stats {
@@ -180,17 +180,17 @@ class PERFTOOLS_DLL_DECL PageHeap {
   // may also be larger than num_pages since page_heap might decide to
   // release one large range instead of fragmenting it into two
   // smaller released and unreleased ranges.
-  Length ReleaseAtLeastNPages(Length num_pages);
+  Length ReleaseAtLeastNPages(Length num_pages); // 尝试至少释放num_pages个页面
 
   // Return 0 if we have no information, or else the correct sizeclass for p.
   // Reads and writes to pagemap_cache_ do not require locking.
   // The entries are 64 bits on 64-bit hardware and 16 bits on
   // 32-bit hardware, and we don't mind raciness as long as each read of
   // an entry yields a valid entry, not a partially updated entry.
-  size_t GetSizeClassIfCached(PageID p) const {
+  size_t GetSizeClassIfCached(PageID p) const { // 在cache中返回这个page id对应的slab class
     return pagemap_cache_.GetOrDefault(p, 0);
   }
-  void CacheSizeClass(PageID p, size_t cl) const { pagemap_cache_.Put(p, cl); }
+  void CacheSizeClass(PageID p, size_t cl) const { pagemap_cache_.Put(p, cl); }// 在cache中存放page id对应的slab class.
 
   bool GetAggressiveDecommit(void) {return aggressive_decommit_;}
   void SetAggressiveDecommit(bool aggressive_decommit) {
@@ -231,15 +231,23 @@ class PERFTOOLS_DLL_DECL PageHeap {
   // has been returned to the system.
   struct SpanList {
     Span        normal;
-    Span        returned;
+    Span        returned;// 其实对于这个部分没有必要区分的，因为代码里面大部分都是挂在normal这个链上的。
   };
 
   // List of free spans of length >= kMaxPages
-  SpanList large_;
+  SpanList large_; // 对于>=kMaxPages的页面单独维护一个free list.
 
   // Array mapping from span length to a doubly linked list of free spans
-  SpanList free_[kMaxPages];
-
+  SpanList free_[kMaxPages]; // 针对每个页面大小做的free list.
+  /*
+  span的状态只有三种，一种是IN_USE表示正在被使用，一种表示ON_NORMAL_FREELIST表示放在了normal freelist上面。 
+  另外一种是ON_RETURNED_FREELIST表示放在returned freelist上面。这里简单地说明一下normal freelist与returned freelist差别。 
+  normal freelist是普通的回收进行缓存起来，
+  而returned freelist表示已经完全unmmap回到系统内存部分了。
+  不过因为实际并没有交回给系统内存， 所以这两个仅仅是概念上面的差别. 
+  */
+  
+  
   // Statistics on system, free, and unmapped bytes
   Stats stats_;
 
@@ -256,6 +264,10 @@ class PERFTOOLS_DLL_DECL PageHeap {
   // return span.
   Span* Carve(Span* span, Length n);
 
+  //逻辑可以说非常简单，但是如果之前看过文档的话需要知道这里面pagemap为什么需要set. 非常简单，
+  //如果span管理的是[p..q]的范围的话，那么在pagemap里面只需要记录(p,span),(q,span). 
+  //这样如果有一个span回收的话，那么在pagemap里面查找p-1和q+1的span,然后尝试合并。
+  //非常精巧。 所以在RecordSpan里面很明显就是需要设置前后的边界 
   void RecordSpan(Span* span) {
     pagemap_.set(span->start, span);
     if (span->length > 1) {
