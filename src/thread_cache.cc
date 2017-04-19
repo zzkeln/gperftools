@@ -61,26 +61,27 @@ namespace tcmalloc {
 
 static bool phinited = false;
 
-volatile size_t ThreadCache::per_thread_cache_size_ = kMaxThreadCacheSize;
-size_t ThreadCache::overall_thread_cache_size_ = kDefaultOverallThreadCacheSize;
-ssize_t ThreadCache::unclaimed_cache_space_ = kDefaultOverallThreadCacheSize;
+volatile size_t ThreadCache::per_thread_cache_size_ = kMaxThreadCacheSize; // 每个tc的大小 (4 << 20,4MB)
+size_t ThreadCache::overall_thread_cache_size_ = kDefaultOverallThreadCacheSize; // 所有tc大小 (8 * kMaxThreadCacheSize = 32MB)
+ssize_t ThreadCache::unclaimed_cache_space_ = kDefaultOverallThreadCacheSize;// 管理对象所持有的tc大小(相当于总tc里面还有多少可用).
 PageHeapAllocator<ThreadCache> threadcache_allocator;
-ThreadCache* ThreadCache::thread_heaps_ = NULL;
-int ThreadCache::thread_heap_count_ = 0;
-ThreadCache* ThreadCache::next_memory_steal_ = NULL;
+ThreadCache* ThreadCache::thread_heaps_ = NULL;// tc链.
+int ThreadCache::thread_heap_count_ = 0;// 多少个tc
+ThreadCache* ThreadCache::next_memory_steal_ = NULL; // 下一次steal的tc.
 #ifdef HAVE_TLS
 __thread ThreadCache::ThreadLocalData ThreadCache::threadlocal_data_
     ATTR_INITIAL_EXEC
     = {0, 0};
 #endif
-bool ThreadCache::tsd_inited_ = false;
-pthread_key_t ThreadCache::heap_key_;
+bool ThreadCache::tsd_inited_ = false;// 是否已经初始化了线程局部数据
+pthread_key_t ThreadCache::heap_key_;// 如果使用pthread线程局部数据解决办法
 
+//注意这里Init已经在外围的NewHeap加锁了。这个地方进行初始化。设置一下最大分配多少空间以及初始化每一个slab 
 void ThreadCache::Init(pthread_t tid) {
   size_ = 0;
 
   max_size_ = 0;
-  IncreaseCacheLimitLocked();
+  IncreaseCacheLimitLocked(); // 这个地方在计算到底可以分配多少max size.
   if (max_size_ == 0) {
     // There isn't enough memory to go around.  Just give the minimum to
     // this thread.
@@ -271,22 +272,22 @@ int ThreadCache::GetSamplePeriod() {
 }
 
 void ThreadCache::InitModule() {
-  SpinLockHolder h(Static::pageheap_lock());
+  SpinLockHolder h(Static::pageheap_lock());  // 全局自选锁
   if (!phinited) {
     const char *tcb = TCMallocGetenvSafe("TCMALLOC_MAX_TOTAL_THREAD_CACHE_BYTES");
     if (tcb) {
       set_overall_thread_cache_size(strtoll(tcb, NULL, 10));
     }
-    Static::InitStaticVars();
-    threadcache_allocator.Init();
+    Static::InitStaticVars();  // 初始化一些静态数据
+    threadcache_allocator.Init();// PageHeapAllocator<ThreadCache>,sample_alloc初始化
     phinited = 1;
   }
 }
 
 void ThreadCache::InitTSD() {
-  ASSERT(!tsd_inited_);
-  perftools_pthread_key_create(&heap_key_, DestroyThreadCache);
-  tsd_inited_ = true;
+  ASSERT(!tsd_inited_);// 这个变量标记是否已经初始化了线程局部变量，如果没有的话那么是没有任何tc的.
+  perftools_pthread_key_create(&heap_key_, DestroyThreadCache); // 这个就是设置好线程局部变量
+  tsd_inited_ = true; // 因为每一个线程都会有一个线程局部变量thread cache.
 
 #ifdef PTHREADS_CRASHES_IF_RUN_TOO_EARLY
   // We may have used a fake pthread_t for the main thread.  Fix it.
@@ -327,6 +328,8 @@ ThreadCache* ThreadCache::CreateCacheIfNecessary() {
     // This may be a recursive malloc call from pthread_setspecific()
     // In that case, the heap for this thread has already been created
     // and added to the linked list.  So we search for that first.
+    // 查找里面是否已经存在,每个线程都创建一个ThreadCache.
+    // 并且这个是按照链组织起来的。
     for (ThreadCache* h = thread_heaps_; h != NULL; h = h->next_) {
       if (h->tid_ == me) {
         heap = h;
@@ -342,7 +345,7 @@ ThreadCache* ThreadCache::CreateCacheIfNecessary() {
   // the "in_setspecific_" flag so that we can avoid calling
   // pthread_setspecific() if we are already inside pthread_setspecific().
   if (!heap->in_setspecific_ && tsd_inited_) {
-    heap->in_setspecific_ = true;
+    heap->in_setspecific_ = true; // 避免setspecific里面还调用
     perftools_pthread_setspecific(heap_key_, heap);
 #ifdef HAVE_TLS
     // Also keep a copy in __thread for faster retrieval
@@ -353,32 +356,33 @@ ThreadCache* ThreadCache::CreateCacheIfNecessary() {
   }
   return heap;
 }
-
+//NewHeap是产生一个新的tc调用Init.将这个tc插入到队列里面.注意这里NewHeap已经加了锁了。 
 ThreadCache* ThreadCache::NewHeap(pthread_t tid) {
   // Create the heap and add it to the linked list
   ThreadCache *heap = threadcache_allocator.New();
-  heap->Init(tid);
-  heap->next_ = thread_heaps_;
+  heap->Init(tid);// 调用Init
+  heap->next_ = thread_heaps_;// 组织成为一个双向链表
   heap->prev_ = NULL;
   if (thread_heaps_ != NULL) {
     thread_heaps_->prev_ = heap;
   } else {
     // This is the only thread heap at the momment.
     ASSERT(next_memory_steal_ == NULL);
-    next_memory_steal_ = heap;
+    next_memory_steal_ = heap;// 如果这个是第一个元素的话，那么设置next_memory_steal.
   }
   thread_heaps_ = heap;
-  thread_heap_count_++;
+  thread_heap_count_++;// tc数量.
   return heap;
 }
 
+//这个函数的作用是认为这个tc没有必要了可以删除
 void ThreadCache::BecomeIdle() {
   if (!tsd_inited_) return;              // No caches yet
   ThreadCache* heap = GetThreadHeap();
   if (heap == NULL) return;             // No thread cache to remove
   if (heap->in_setspecific_) return;    // Do not disturb the active caller
 
-  heap->in_setspecific_ = true;
+  heap->in_setspecific_ = true;// 防止递归调用
   perftools_pthread_setspecific(heap_key_, NULL);
 #ifdef HAVE_TLS
   // Also update the copy in __thread
@@ -386,13 +390,14 @@ void ThreadCache::BecomeIdle() {
   SetMinSizeForSlowPath(0);
 #endif
   heap->in_setspecific_ = false;
-  if (GetThreadHeap() == heap) {
+  if (GetThreadHeap() == heap) { // 应该是不会调用这个部分逻辑的.
     // Somehow heap got reinstated by a recursive call to malloc
     // from pthread_setspecific.  We give up in this case.
     return;
   }
 
   // We can now get rid of the heap
+  //然后将这个heap释放掉
   DeleteCache(heap);
 }
 
@@ -402,6 +407,7 @@ void ThreadCache::BecomeTemporarilyIdle() {
     heap->Cleanup();
 }
 
+//这个方法就是销毁掉线程的tc 
 void ThreadCache::DestroyThreadCache(void* ptr) {
   // Note that "ptr" cannot be NULL since pthread promises not
   // to invoke the destructor on NULL values, but for safety,
