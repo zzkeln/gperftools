@@ -131,6 +131,15 @@
 // 2^kKeybits and the values to be less than 2^kValuebits.  The size of
 // the table is controlled by kHashbits, and the type of each entry in
 // the cache is T.  See also the big comment at the top of the file.
+/*
+PackedCache是一种非常精巧的数据结构。它的作用主要是想知道对于一个pageId所管理的span而言的话，对应的sizeclass是什么。 
+在pageheap里面是这样定义的 typedef PackedCache<BITS-kPageShift, uint64_t> CacheType; 我们还是看看这个结构是什么样的 
+首先它还是一个KV结构，只不过K+V大小可以放在sizeof(T)字节里面。回顾一下对于64位而言，PageId 52位，
+而sizeclass只有85中，完全可以存放在sizeof(uint64_t)里面。 将K放在高字节，而V放在低字节，
+组成一个<sizeof(uint64_t)大小的值存放在array_里面。
+此外还需要注意一个问题就是，这个有可能被多线程访问， 
+但是如果我们将这个内容设置称为volatile的话，那么是不需要加锁就可以完成的。 
+*/
 template <int kKeybits, typename T>
 class PackedCache {
  public:
