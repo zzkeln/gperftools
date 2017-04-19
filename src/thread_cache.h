@@ -65,7 +65,12 @@ namespace tcmalloc {
 //-------------------------------------------------------------------
 // Data kept per thread
 //-------------------------------------------------------------------
-
+/*
+Thread Cache就是每一个线程里面管理小对象分配的cache.tcmalloc应该是假设局部线程里面通常分配的都是小对象，
+这样可以减少锁竞争。 而如果是分配大对象的话，那么会直接从page heap里面进行分配。如果本地小对象不够的话，
+那么会尝试从central cache里面要
+*/
+ 
 class ThreadCache {
  public:
 #ifdef HAVE_TLS
@@ -75,10 +80,11 @@ class ThreadCache {
 #endif
 
   // All ThreadCache objects are kept in a linked list (for stats collection)
+  //所有ThreadCache都放在一个链表中
   ThreadCache* next_;
   ThreadCache* prev_;
 
-  void Init(pthread_t tid);
+  void Init(pthread_t tid);  // 初始化
   void Cleanup();
 
   // Accessors (mostly just for printing stats)
@@ -89,25 +95,25 @@ class ThreadCache {
 
   // Allocate an object of the given size and class. The size given
   // must be the same as the size of the class in the size map.
-  void* Allocate(size_t size, size_t cl);
-  void Deallocate(void* ptr, size_t size_class);
+  void* Allocate(size_t size, size_t cl); // 从class里面分配size大小
+  void Deallocate(void* ptr, size_t size_class); // 将ptr放回class对应slab里面
 
-  void Scavenge();
+  void Scavenge(); // 回收内存到central cache.就是文档里面说的GC
 
   int GetSamplePeriod();
 
   // Record allocation of "k" bytes.  Return true iff allocation
   // should be sampled
-  bool SampleAllocation(size_t k);
+  bool SampleAllocation(size_t k); // 是否认为这次分配的k字节需要进行采样.
 
-  static void         InitModule();
-  static void         InitTSD();
-  static ThreadCache* GetThreadHeap();
-  static ThreadCache* GetCache();
+  static void         InitModule();  // 初始化模块
+  static void         InitTSD(); //初始化thread storage data.
+  static ThreadCache* GetThreadHeap(); 
+  static ThreadCache* GetCache(); // thread cache.
   static ThreadCache* GetCacheIfPresent();
   static ThreadCache* GetCacheWhichMustBePresent();
-  static ThreadCache* CreateCacheIfNecessary();
-  static void         BecomeIdle();
+  static ThreadCache* CreateCacheIfNecessary(); // 如果tc不存在就创建
+  static void         BecomeIdle();  // 标记这个thread已经idle，所以可以释放这个tc了
   static void         BecomeTemporarilyIdle();
   static size_t       MinSizeForSlowPath();
   static void         SetMinSizeForSlowPath(size_t size);
@@ -301,7 +307,7 @@ class ThreadCache {
   // Static::pageheap_lock.  Reads are done without any locking, which should be
   // fine as long as size_t can be written atomically and we don't place
   // invariants between this variable and other pieces of state.
-  static volatile size_t per_thread_cache_size_;
+  static volatile size_t per_thread_cache_size_; // 每个tc的大小 (4 << 20,4MB)
 
   // Represents overall_thread_cache_size_ minus the sum of max_size_
   // across all ThreadCaches.  Protected by Static::pageheap_lock.
@@ -390,6 +396,7 @@ inline void ThreadCache::Deallocate(void* ptr, size_t cl) {
   }
 }
 
+//GetThreadHeap非常简单直接从线程局部变量里面取出即可 
 inline ThreadCache* ThreadCache::GetThreadHeap() {
 #ifdef HAVE_TLS
   return threadlocal_data_.heap;
@@ -413,11 +420,11 @@ inline ThreadCache* ThreadCache::GetCacheWhichMustBePresent() {
 inline ThreadCache* ThreadCache::GetCache() {
   ThreadCache* ptr = NULL;
   if (!tsd_inited_) {
-    InitModule();
+    InitModule(); // 初始化模块
   } else {
-    ptr = GetThreadHeap();
+    ptr = GetThreadHeap(); //直接查看是否存在
   }
-  if (ptr == NULL) ptr = CreateCacheIfNecessary();
+  if (ptr == NULL) ptr = CreateCacheIfNecessary(); //不存在的话就创建出一个
   return ptr;
 }
 
