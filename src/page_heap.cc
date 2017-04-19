@@ -73,6 +73,7 @@ PageHeap::PageHeap()
   DLL_Init(&large_.normal);
   DLL_Init(&large_.returned);
   for (int i = 0; i < kMaxPages; i++) {
+    //初始化每个双向链表
     DLL_Init(&free_[i].normal);
     DLL_Init(&free_[i].returned);
   }
@@ -84,11 +85,11 @@ Span* PageHeap::SearchFreeAndLargeLists(Length n) {
 
   // Find first size >= n that has a non-empty list
   for (Length s = n; s < kMaxPages; s++) {
-    Span* ll = &free_[s].normal;
+    Span* ll = &free_[s].normal;  // 遍历所有的Pages看看是否有合适的。
     // If we're lucky, ll is non-empty, meaning it has a suitable span.
     if (!DLL_IsEmpty(ll)) {
       ASSERT(ll->next->location == Span::ON_NORMAL_FREELIST);
-      return Carve(ll->next, n);
+      return Carve(ll->next, n);  // 如果有合适的话，那么可能需要切割一下,从里面切割出n pages出来
     }
     // Alternatively, maybe there's a usable returned span.
     ll = &free_[s].returned;
@@ -108,11 +109,14 @@ Span* PageHeap::SearchFreeAndLargeLists(Length n) {
     }
   }
   // No luck in free lists, our last chance is in a larger class.
-  return AllocLarge(n);  // May be NULL
+  return AllocLarge(n);  // May be NULL 如果没有分配成功的话那么从AllocLarge里面分配
 }
 
 static const size_t kForcedCoalesceInterval = 128*1024*1024;
 
+//New的逻辑非常简单，首先会尝试在free list里面查找，如果没有的话在lage free list里面查找，
+//不行的话尝试要更多的内存，然后重试。 需要注意的是，因为这个是一个全局的操作，
+//所以前面都会加上自选锁 SpinLockHolder h(Static::pageheap_lock()); 
 Span* PageHeap::New(Length n) {
   ASSERT(Check());
   ASSERT(n > 0);
@@ -168,6 +172,7 @@ Span* PageHeap::New(Length n) {
   return SearchFreeAndLargeLists(n);
 }
 
+//对于AllocLarge部分的话非常简单，就是使用最佳匹配算法。完了之后调用Carve同样进行切割  
 Span* PageHeap::AllocLarge(Length n) {
   // find the best span (closest to n in size).
   // The following loops implements address-ordered best-fit.
@@ -203,12 +208,13 @@ Span* PageHeap::AllocLarge(Length n) {
     }
   }
 
+  //走到这个逻辑，说明best在normal list中，那么切割n个page然后返回
   if (best == bestNormal) {
     return best == NULL ? NULL : Carve(best, n);
   }
 
   // best comes from returned list.
-
+  //走到这个逻辑，说明best在returned list中
   if (EnsureLimit(n, false)) {
     return Carve(best, n);
   }
@@ -236,7 +242,6 @@ Span* PageHeap::Split(Span* span, Length n) {
   const int extra = span->length - n;
   Span* leftover = NewSpan(span->start + n, extra);
   ASSERT(leftover->location == Span::IN_USE);
-  Event(leftover, 'U', extra);
   RecordSpan(leftover);
   pagemap_.set(span->start + n - 1, span); // Update map from pageid to span
   span->length = n;
@@ -263,18 +268,18 @@ bool PageHeap::DecommitSpan(Span* span) {
 Span* PageHeap::Carve(Span* span, Length n) {
   ASSERT(n > 0);
   ASSERT(span->location != Span::IN_USE);
-  const int old_location = span->location;
-  RemoveFromFreeList(span);
-  span->location = Span::IN_USE;
+  const int old_location = span->location; 
+  RemoveFromFreeList(span); // 从freelist里面删除，同时记录信息也会更改。
+  span->location = Span::IN_USE; // 修改一下location.
   Event(span, 'A', n);
 
   const int extra = span->length - n;
   ASSERT(extra >= 0);
   if (extra > 0) {
-    Span* leftover = NewSpan(span->start + n, extra);
-    leftover->location = old_location;
+    Span* leftover = NewSpan(span->start + n, extra);// 创建一个新的span对象
+    leftover->location = old_location; // 这个新的对象里面存放到是原来location.
     Event(leftover, 'S', extra);
-    RecordSpan(leftover);
+    RecordSpan(leftover); // 将剩余的span记录下来并且插入到free list里面.
 
     // The previous span of |leftover| was just splitted -- no need to
     // coalesce them. The next span of |leftover| was not previously coalesced
@@ -290,7 +295,7 @@ Span* PageHeap::Carve(Span* span, Length n) {
 
     PrependToFreeList(leftover);  // Skip coalescing - no candidates possible
     span->length = n;
-    pagemap_.set(span->start + n - 1, span);
+    pagemap_.set(span->start + n - 1, span); // 同时标记span管理的范围.
   }
   ASSERT(Check());
   if (old_location == Span::ON_RETURNED_FREELIST) {
@@ -594,6 +599,9 @@ static void RecordGrowth(size_t growth) {
   Static::set_growth_stacks(t);
 }
 
+/*
+GrowHeap就是需要尝试从系统中拿出更多的内存出来然后好做切分，满足本次allocate n pages的请求。 GrowHeap里面有一些策略 
+*/
 bool PageHeap::GrowHeap(Length n) {
   ASSERT(kMaxPages >= kMinSystemAlloc);
   if (n > kMaxValidPages) return false;
