@@ -319,8 +319,8 @@ void PageHeap::Delete(Span* span) {
   span->sample = 0;
   span->location = Span::ON_NORMAL_FREELIST;
   Event(span, 'D', span->length);
-  MergeIntoFreeList(span);  // Coalesces if possible
-  IncrementalScavenge(n);
+  MergeIntoFreeList(span);  // Coalesces if possible // 会尝试进行合并
+  IncrementalScavenge(n); // 增量收集. 后面会仔细看这个函数的定义
   ASSERT(stats_.unmapped_bytes+ stats_.committed_bytes==stats_.system_bytes);
   ASSERT(Check());
 }
@@ -366,6 +366,7 @@ void PageHeap::MergeIntoFreeList(Span* span) {
   const PageID p = span->start;
   const Length n = span->length;
   Span* prev = GetDescriptor(p-1);
+  // 首先尝试合并p-1 pages这个span
   if (prev != NULL && MayMergeSpans(span, prev)) {
     // Merge preceding span into this span
     ASSERT(prev->start + prev->length == p);
@@ -385,6 +386,7 @@ void PageHeap::MergeIntoFreeList(Span* span) {
     pagemap_.set(span->start, span);
     Event(span, 'L', len);
   }
+   // 然后尝试合并p+n pages这个span.
   Span* next = GetDescriptor(p+n);
   if (next != NULL && MayMergeSpans(span, next)) {
     // Merge next span into this span
@@ -409,6 +411,7 @@ void PageHeap::MergeIntoFreeList(Span* span) {
       ASSERT(temp_committed == 0);
     }
   }
+   // 合并完成之后就会放入free list里面去
   PrependToFreeList(span);
 }
 
@@ -433,7 +436,12 @@ void PageHeap::RemoveFromFreeList(Span* span) {
   }
   DLL_Remove(span);
 }
-
+/*
+IncrementalScavenge这个意思就是增量回收，大致内容就是说将一部分的页面交回给系统内存。
+虽然在tcmalloc里面实现并没有完全交回给系统内存， 而只是简单地挂在了_returned_free_list上面，
+但是里面的策略还是值得看看的。这里所谓的scavenge_counter_意思就是如果归还了多少内存之后， 
+那么我们就会尝试进行一次完全交回给系统内存. 
+*/
 void PageHeap::IncrementalScavenge(Length n) {
   // Fast path; not yet time to release memory
   scavenge_counter_ -= n;
@@ -606,13 +614,15 @@ bool PageHeap::GrowHeap(Length n) {
   ASSERT(kMaxPages >= kMinSystemAlloc);
   if (n > kMaxValidPages) return false;
   Length ask = (n>kMinSystemAlloc) ? n : static_cast<Length>(kMinSystemAlloc);
+  //// 会判断是否超过，如果没有超过的话，
+  // 那么按照kMinSystemAlloc分配
   size_t actual_size;
   void* ptr = NULL;
   if (EnsureLimit(ask)) {
       ptr = TCMalloc_SystemAlloc(ask << kPageShift, &actual_size, kPageSize);
   }
   if (ptr == NULL) {
-    if (n < ask) {
+    if (n < ask) {// 如果ask分配不了，那么尝试分配n
       // Try growing just "n" pages
       ask = n;
       if (EnsureLimit(ask)) {
@@ -642,12 +652,12 @@ bool PageHeap::GrowHeap(Length n) {
   // Make sure pagemap_ has entries for all of the new pages.
   // Plus ensure one before and one after so coalescing code
   // does not need bounds-checking.
-  if (pagemap_.Ensure(p-1, ask+2)) {
+  if (pagemap_.Ensure(p-1, ask+2)) {// 因为需要插入新的span,所以必须确保这个pagemap确实存在.
     // Pretend the new area is allocated and then Delete() it to cause
     // any necessary coalescing to occur.
     Span* span = NewSpan(p, ask);
     RecordSpan(span);
-    Delete(span);
+    Delete(span);// 将这个Span返回给large_里等待下次分配
     ASSERT(stats_.unmapped_bytes+ stats_.committed_bytes==stats_.system_bytes);
     ASSERT(Check());
     return true;
