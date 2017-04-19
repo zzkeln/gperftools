@@ -232,6 +232,7 @@ Span* PageHeap::AllocLarge(Length n) {
   return NULL;
 }
 
+//Split过程和Carve过程是非常相似的，只不过Split针对的是IN_USE状态的这种span.
 Span* PageHeap::Split(Span* span, Length n) {
   ASSERT(0 < n);
   ASSERT(n < span->length);
@@ -447,6 +448,8 @@ void PageHeap::IncrementalScavenge(Length n) {
   scavenge_counter_ -= n;
   if (scavenge_counter_ >= 0) return;  // Not yet time to scavenge
 
+  // // 默认值的话是1.0,这个可以有环境变量设置.
+  // 如果回收率很低的哈，那么相当于不会归还给系统内存
   const double rate = FLAGS_tcmalloc_release_rate;
   if (rate <= 1e-6) {
     // Tiny release rate means that releasing is disabled.
@@ -454,12 +457,15 @@ void PageHeap::IncrementalScavenge(Length n) {
     return;
   }
 
+  // 尝试至归还一个页面.
+  // 具体这个函数实现在后面会提到.
   Length released_pages = ReleaseAtLeastNPages(1);
 
+  // 如果实际上没有归还的话，那么下次需要等待这么多次之后尝试归还.
   if (released_pages == 0) {
     // Nothing to scavenge, delay for a while.
     scavenge_counter_ = kDefaultReleaseDelay;
-  } else {
+  } else {  // 否则会按照一定的策略设定次数然后尝试归还
     // Compute how long to wait until we return memory.
     // FLAGS_tcmalloc_release_rate==1 means wait for 1000 pages
     // after releasing one page.
@@ -478,16 +484,22 @@ Length PageHeap::ReleaseLastNormalSpan(SpanList* slist) {
   ASSERT(s->location == Span::ON_NORMAL_FREELIST);
 
   if (DecommitSpan(s)) {
-    RemoveFromFreeList(s);
+    RemoveFromFreeList(s);// 从当前链中释放掉.
     const Length n = s->length;
-    s->location = Span::ON_RETURNED_FREELIST;
-    MergeIntoFreeList(s);  // Coalesces if possible.
+     // 实际上这个部分并没有释放哦.
+    s->location = Span::ON_RETURNED_FREELIST;// 标记为returned状态
+    MergeIntoFreeList(s);  // Coalesces if possible. // 丢回return free list时候会尝试合并.
     return n;
   }
 
   return 0;
 }
 
+ /*
+  这个函数的语义就是至少尝试释放n pages.实现方式非常简单，
+  每次都从一种pages里面取出一个东西并且进行释放，直到全部释放为止。 
+  算是一种round-robin的方式吧，我猜想这样释放的方式对于后面分配的性能影响比较小，每一种大小都释放一些。 
+*/
 Length PageHeap::ReleaseAtLeastNPages(Length num_pages) {
   Length released_pages = 0;
 
@@ -497,7 +509,7 @@ Length PageHeap::ReleaseAtLeastNPages(Length num_pages) {
   while (released_pages < num_pages && stats_.free_bytes > 0) {
     for (int i = 0; i < kMaxPages+1 && released_pages < num_pages;
          i++, release_index_++) {
-      if (release_index_ > kMaxPages) release_index_ = 0;
+      if (release_index_ > kMaxPages) release_index_ = 0; // 每个大小类型都会尝试释放一个.
       SpanList* slist = (release_index_ == kMaxPages) ?
           &large_ : &free_[release_index_];
       if (!DLL_IsEmpty(&slist->normal)) {
