@@ -88,7 +88,7 @@ void ThreadCache::Init(pthread_t tid) {
     max_size_ = kMinThreadCacheSize;
 
     // Take unclaimed_cache_space_ negative.
-    unclaimed_cache_space_ -= kMinThreadCacheSize;
+    unclaimed_cache_space_ -= kMinThreadCacheSize;// 那么相当于tc持有空闲空间也对应减少
     ASSERT(unclaimed_cache_space_ < 0);
   }
 
@@ -97,36 +97,40 @@ void ThreadCache::Init(pthread_t tid) {
   tid_  = tid;
   in_setspecific_ = false;
   for (size_t cl = 0; cl < kNumClasses; ++cl) {
-    list_[cl].Init();
+    list_[cl].Init();// 初始化每个slab
   }
 
   uint32_t sampler_seed;
   memcpy(&sampler_seed, &tid, sizeof(sampler_seed));
-  sampler_.Init(sampler_seed);
+  sampler_.Init(sampler_seed);// 初始化sampler
 }
 
+//作用就是将自己持有的内存归还给系统 
 void ThreadCache::Cleanup() {
   // Put unused memory back into central cache
   for (int cl = 0; cl < kNumClasses; ++cl) {
     if (list_[cl].length() > 0) {
-      ReleaseToCentralCache(&list_[cl], cl, list_[cl].length());
+      ReleaseToCentralCache(&list_[cl], cl, list_[cl].length());//遍历所有的slab并且将上面挂在的free list归还给central cache
     }
   }
 }
 
 // Remove some objects of class "cl" from central cache and add to thread heap.
 // On success, return the first object for immediate use; otherwise return NULL.
+    //这个部分的逻辑是从cc里面取出一系列的slab对象出来。里面有很多策略
 void* ThreadCache::FetchFromCentralCache(size_t cl, size_t byte_size) {
   FreeList* list = &list_[cl];
   ASSERT(list->empty());
   const int batch_size = Static::sizemap()->num_objects_to_move(cl);
 
+    // // 看看每次允许的分配的个数是多少
   const int num_to_move = min<int>(list->max_length(), batch_size);
   void *start, *end;
   int fetch_count = Static::central_cache()[cl].RemoveRange(
       &start, &end, num_to_move);
 
   ASSERT((start == NULL) == (fetch_count == 0));
+  // 取出来并且设置一下当前维护的空闲大小是多少
   if (--fetch_count >= 0) {
     size_ += byte_size * fetch_count;
     list->PushRange(fetch_count, SLL_Next(start), end);
@@ -135,6 +139,8 @@ void* ThreadCache::FetchFromCentralCache(size_t cl, size_t byte_size) {
   // Increase max length slowly up to batch_size.  After that,
   // increase by batch_size in one shot so that the length is a
   // multiple of batch_size.
+    // 这里需要增长max_length.如果<batch_size的话那么+1
+  // 如果>=batch_size的话，那么会设置成为某个上线
   if (list->max_length() < batch_size) {
     list->set_max_length(list->max_length() + 1);
   } else {
@@ -146,6 +152,8 @@ void* ThreadCache::FetchFromCentralCache(size_t cl, size_t byte_size) {
     // The list's max_length must always be a multiple of batch_size,
     // and kMaxDynamicFreeListLength is not necessarily a multiple
     // of batch_size.
+      // 这里也非常好理解，按照batch_size来分配的话，可以直接从tc里面得到
+    // 使用这个作为max_kength的话通常意味着分配速度会更快.
     new_length -= new_length % batch_size;
     ASSERT(new_length % batch_size == 0);
     list->set_max_length(new_length);
@@ -153,6 +161,12 @@ void* ThreadCache::FetchFromCentralCache(size_t cl, size_t byte_size) {
   return start;
 }
 
+/*
+到这个地方必须思考一个问题，就是什么时候max_length会发生变化以及如何变化的(触发这些变化的意义是什么). 
+我们可以看到Allocate里面如果从cc里面取在不断地增加max_length(存在上限).问题是我们不能够让这个部分缓存太多的内容，
+所以我们必须在一段时间内缩小max_length，
+一旦length>max_length的话就会触发ListTooLong. 而ListTooLong里面的操作就是将max_length尝试缩小并且将一部分object归还给cc. 
+*/    
 void ThreadCache::ListTooLong(FreeList* list, size_t cl) {
   const int batch_size = Static::sizemap()->num_objects_to_move(cl);
   ReleaseToCentralCache(list, cl, batch_size);
@@ -180,12 +194,12 @@ void ThreadCache::ListTooLong(FreeList* list, size_t cl) {
 // Remove some objects of class "cl" from thread heap and add to central cache
 void ThreadCache::ReleaseToCentralCache(FreeList* src, size_t cl, int N) {
   ASSERT(src == &list_[cl]);
-  if (N > src->length()) N = src->length();
-  size_t delta_bytes = N * Static::sizemap()->ByteSizeForClass(cl);
+  if (N > src->length()) N = src->length();// 这个地方感觉不是很有必要.不过其他地方的话可能这两个参数不同
+  size_t delta_bytes = N * Static::sizemap()->ByteSizeForClass(cl); // 了解有多少个对象占用内存大小释放.
 
   // We return prepackaged chains of the correct size to the central cache.
   // TODO: Use the same format internally in the thread caches?
-  int batch_size = Static::sizemap()->num_objects_to_move(cl);
+  int batch_size = Static::sizemap()->num_objects_to_move(cl);// 每次归还batch_size个内容，这样central cache可以放在transfer cache里面
   while (N > batch_size) {
     void *tail, *head;
     src->PopRange(batch_size, &head, &tail);
@@ -237,8 +251,11 @@ void ThreadCache::IncreaseCacheLimit() {
   IncreaseCacheLimitLocked();
 }
 
+//这个函数是在计算这个tc里面最多可以分配多少内存
+//总之tc的max_size分配策略的话就是根据当前所有tc剩余的空间如果没有空间的话那么尝试从其他的tc里面获取。
+//应该是想限制一开始每个tc的最大大小。 但是需要注意的是，这个tc最大大小并不是一成不变的，可能会随着时间变化而增加。 
 void ThreadCache::IncreaseCacheLimitLocked() {
-  if (unclaimed_cache_space_ > 0) {
+  if (unclaimed_cache_space_ > 0) {// 如果tc里面还有空闲的内容的话，那么获取64KB过来
     // Possibly make unclaimed_cache_space_ negative.
     unclaimed_cache_space_ -= kStealAmount;
     max_size_ += kStealAmount;
@@ -248,6 +265,9 @@ void ThreadCache::IncreaseCacheLimitLocked() {
   // threads before giving up.  The i < 10 condition also prevents an
   // infinite loop in case none of the existing thread heaps are
   // suitable places to steal from.
+  // 如果发现依然不够的话，那么会从每一个以后的tc里面获取偷取部分出来.
+  // 这个链是按照next_memory_steal_取出来的，如果==NULL那么从头开始。
+  // 但是很快会发现这个max_size其实并不是一成不变的.
   for (int i = 0; i < 10;
        ++i, next_memory_steal_ = next_memory_steal_->next_) {
     // Reached the end of the linked list.  Start at the beginning.
@@ -421,6 +441,7 @@ void ThreadCache::DestroyThreadCache(void* ptr) {
   DeleteCache(reinterpret_cast<ThreadCache*>(ptr));
 }
 
+//DeleteCache作用就是删除一个tc.大致逻辑非常简单，首先将自己持有的内存归还给central cache,然后将自己从tc的链中删除即可。
 void ThreadCache::DeleteCache(ThreadCache* heap) {
   // Remove all memory from heap
   heap->Cleanup();
@@ -432,6 +453,7 @@ void ThreadCache::DeleteCache(ThreadCache* heap) {
   if (thread_heaps_ == heap) thread_heaps_ = heap->next_;
   thread_heap_count_--;
 
+  //将自己删除之后需要重新计算thread_heaps以及next_memory_steal这两个变量。 
   if (next_memory_steal_ == heap) next_memory_steal_ = heap->next_;
   if (next_memory_steal_ == NULL) next_memory_steal_ = thread_heaps_;
   unclaimed_cache_space_ += heap->max_size_;
