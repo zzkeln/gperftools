@@ -142,19 +142,20 @@ class ThreadCache {
   }
 
  private:
+  //freelist就是对应的slab.本质上数据结构就是一个单向链表,毕竟这个分配对于顺序没有任何要求
   class FreeList {
    private:
     void*    list_;       // Linked list of nodes
 
 #ifdef _LP64
     // On 64-bit hardware, manipulating 16-bit values may be slightly slow.
-    uint32_t length_;      // Current length.
-    uint32_t lowater_;     // Low water mark for list length.
-    uint32_t max_length_;  // Dynamic max list length based on usage.
+    uint32_t length_;      // Current length. 当前长度是多少
+    uint32_t lowater_;     // Low water mark for list length. 长度最少时候达到多少
+    uint32_t max_length_;  // Dynamic max list length based on usage. // 认为的最大长度多少
     // Tracks the number of times a deallocation has caused
     // length_ > max_length_.  After the kMaxOverages'th time, max_length_
     // shrinks and length_overages_ is reset to zero.
-    uint32_t length_overages_;
+    uint32_t length_overages_; // 超过最大长度的次数
 #else
     // If we aren't using 64-bit pointers then pack these into less space.
     uint16_t length_;
@@ -358,41 +359,44 @@ inline bool ThreadCache::SampleAllocation(size_t k) {
   return false;
 #endif
 }
-
+//Allocate就是从对应的slab里面分配出一个object.
+//注意在Init时候的话每个tc里面是没有任何内容的，size_=0.FreeList也是空的。
 inline void* ThreadCache::Allocate(size_t size, size_t cl) {
   ASSERT(size <= kMaxSize);
   ASSERT(size == Static::sizemap()->ByteSizeForClass(cl));
 
   FreeList* list = &list_[cl];
   if (UNLIKELY(list->empty())) {
-    return FetchFromCentralCache(cl, size);
+    return FetchFromCentralCache(cl, size);// 如果list里面为空的话，那么尝试从cc的cl里面分配size出来
   }
-  size_ -= size;
+  size_ -= size;// 如果存在的话那么就直接-size并且弹出一个元素
   return list->Pop();
 }
 
 inline void ThreadCache::Deallocate(void* ptr, size_t cl) {
   FreeList* list = &list_[cl];
-  size_ += Static::sizemap()->ByteSizeForClass(cl);
-  ssize_t size_headroom = max_size_ - size_ - 1;
+  size_ += Static::sizemap()->ByteSizeForClass(cl);// 释放了这个内存所以空闲大小增大
+  ssize_t size_headroom = max_size_ - size_ - 1;// 在size上面的话还有多少空闲.
 
   // This catches back-to-back frees of allocs in the same size
   // class. A more comprehensive (and expensive) test would be to walk
   // the entire freelist. But this might be enough to find some bugs.
   ASSERT(ptr != list->Next());
 
-  list->Push(ptr);
+  list->Push(ptr); // 归还
   ssize_t list_headroom =
-      static_cast<ssize_t>(list->max_length()) - list->length();
+      static_cast<ssize_t>(list->max_length()) - list->length();// 在长度上还有多少空闲
 
   // There are two relatively uncommon things that require further work.
   // In the common case we're done, and in that case we need a single branch
   // because of the bitwise-or trick that follows.
-  if (UNLIKELY((list_headroom | size_headroom) < 0)) {
-    if (list_headroom < 0) {
+  if (UNLIKELY((list_headroom | size_headroom) < 0)) {// 这个部分应该是有任意一个<0的话，那么就应该进入。优化手段吧.
+    if (list_headroom < 0) {// 如果当前长度>max_length的话，那么需要重新设置max_length.
       ListTooLong(list, cl);
     }
-    if (size_ >= max_size_) Scavenge();
+   // 条件相当 if(size_headroom < 0)
+        // 因为ListTooLog会尝试修改size_所以这里重新判断..:(tricky:(.
+    if (size_ >= max_size_) Scavenge(); // 如果当前size>max_size的话，那么需要进行GC.
   }
 }
 
