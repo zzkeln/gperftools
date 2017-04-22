@@ -88,6 +88,7 @@ class ThreadCache {
   void Cleanup();
 
   // Accessors (mostly just for printing stats)
+  // cl这个sizeclass对应的freelist里的object有多少个
   int freelist_length(size_t cl) const { return list_[cl].length(); }
 
   // Total byte size in cache
@@ -145,11 +146,11 @@ class ThreadCache {
   //freelist就是对应的slab.本质上数据结构就是一个单向链表,毕竟这个分配对于顺序没有任何要求
   class FreeList {
    private:
-    void*    list_;       // Linked list of nodes
+    void*    list_;       // Linked list of nodes 空闲链表的表头
 
 #ifdef _LP64
     // On 64-bit hardware, manipulating 16-bit values may be slightly slow.
-    uint32_t length_;      // Current length. 当前长度是多少
+    uint32_t length_;      // Current length. 当前空闲链表的长度是多少（长度是指空闲的Object有多少个）
     uint32_t lowater_;     // Low water mark for list length. 长度最少时候达到多少
     uint32_t max_length_;  // Dynamic max list length based on usage. // 认为的最大长度多少
     // Tracks the number of times a deallocation has caused
@@ -174,6 +175,7 @@ class ThreadCache {
     }
 
     // Return current length of list
+    //返回当前空闲链表的元素数量
     size_t length() const {
       return length_;
     }
@@ -207,11 +209,13 @@ class ThreadCache {
     int lowwatermark() const { return lowater_; }
     void clear_lowwatermark() { lowater_ = length_; }
 
+   //将ptr指向的object放入空闲链表，长度++
     void Push(void* ptr) {
       SLL_Push(&list_, ptr);
       length_++;
     }
 
+   //从空闲链表拿出一个object，长度--
     void* Pop() {
       ASSERT(list_ != NULL);
       length_--;
@@ -219,15 +223,19 @@ class ThreadCache {
       return SLL_Pop(&list_);
     }
 
+   //当前空闲链表的下一个元素
     void* Next() {
       return SLL_Next(&list_);
     }
 
+   //将start, end之间的object（此时start, end之间的object已经串联起来了，用前4或8个字节来放下个节点的地址）
+   //放入空闲链表，更新表头为start
     void PushRange(int N, void *start, void *end) {
       SLL_PushRange(&list_, start, end);
       length_ += N;
     }
 
+   //从空闲链表中移除N个节点，N个节点的头置为start, 尾置为end
     void PopRange(int N, void **start, void **end) {
       SLL_PopRange(&list_, N, start, end);
       ASSERT(length_ >= N);
@@ -292,6 +300,7 @@ class ThreadCache {
   static pthread_key_t heap_key_;
 
   // Linked list of heap objects.  Protected by Static::pageheap_lock.
+ //静态全局变量，将每个ThreadCache通过链表连接起来（thread_heaps_是表头，每个节点通过prev和next来连接）
   static ThreadCache* thread_heaps_;
   static int thread_heap_count_;
 
@@ -299,6 +308,7 @@ class ThreadCache {
   // the next ThreadCache from which a thread over its max_size_ should
   // steal memory limit.  Round-robin through all of the objects in
   // thread_heaps_.  Protected by Static::pageheap_lock.
+ //指向一个ThreadCache，表示当一个线程的内存使用超过max_size_时会从这个ThreadCache“偷”一点内存上限
   static ThreadCache* next_memory_steal_;
 
   // Overall thread cache size.  Protected by Static::pageheap_lock.
@@ -323,8 +333,10 @@ class ThreadCache {
   // We sample allocations, biased by the size of the allocation
   Sampler       sampler_;               // A sampler
 
+ //ThreadCache里包括kNumClasses种sizeclass，每个都通过一个FreeList来串联起来，这是空闲链表的核心存储地方
   FreeList      list_[kNumClasses];     // Array indexed by size-class
 
+ //当前ThreadCache所属的线程id
   pthread_t     tid_;                   // Which thread owns it
   bool          in_setspecific_;        // In call to pthread_setspecific?
 
@@ -360,30 +372,34 @@ inline bool ThreadCache::SampleAllocation(size_t k) {
 #endif
 }
 //Allocate就是从对应的slab里面分配出一个object.
-//注意在Init时候的话每个tc里面是没有任何内容的，size_=0.FreeList也是空的。
+//注意在Init时候的话每个tc里面是没有任何内容的。
 inline void* ThreadCache::Allocate(size_t size, size_t cl) {
   ASSERT(size <= kMaxSize);
+ //三个数组的index是cl， 这个object得大小是size字节
   ASSERT(size == Static::sizemap()->ByteSizeForClass(cl));
 
   FreeList* list = &list_[cl];
   if (UNLIKELY(list->empty())) {
     return FetchFromCentralCache(cl, size);// 如果list里面为空的话，那么尝试从cc的cl里面分配size出来
   }
-  size_ -= size;// 如果存在的话那么就直接-size并且弹出一个元素
+  size_ -= size;// 如果存在的话那么就直接-size并且弹出一个元素（这个元素占用size个字节，并且sizeclass=cl）
   return list->Pop();
 }
 
+//释放ptr，对应的sizeclass=cl
 inline void ThreadCache::Deallocate(void* ptr, size_t cl) {
   FreeList* list = &list_[cl];
+ //当前ThreadCache占用的内存+cl对应的字节数
   size_ += Static::sizemap()->ByteSizeForClass(cl);// 释放了这个内存所以空闲大小增大
   ssize_t size_headroom = max_size_ - size_ - 1;// 在size上面的话还有多少空闲.
 
   // This catches back-to-back frees of allocs in the same size
   // class. A more comprehensive (and expensive) test would be to walk
   // the entire freelist. But this might be enough to find some bugs.
+  //更严谨的判断是遍历空闲链表，判断每个元素的地址都不应该等于ptr，否则ptr是已经释放回来的内存了再释放个啥嘞
   ASSERT(ptr != list->Next());
 
-  list->Push(ptr); // 归还
+  list->Push(ptr); // 归还ptr到freelist中
   ssize_t list_headroom =
       static_cast<ssize_t>(list->max_length()) - list->length();// 在长度上还有多少空闲
 
