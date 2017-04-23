@@ -30,7 +30,6 @@
 
 // ---
 // Author: Ken Ashcraft <opensource@google.com>
-
 #include <config.h>
 #include "thread_cache.h"
 #include <errno.h>
