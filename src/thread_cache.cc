@@ -66,7 +66,7 @@ ssize_t ThreadCache::unclaimed_cache_space_ = kDefaultOverallThreadCacheSize;// 
 PageHeapAllocator<ThreadCache> threadcache_allocator;
 ThreadCache* ThreadCache::thread_heaps_ = NULL;// tc链.
 int ThreadCache::thread_heap_count_ = 0;// 多少个tc
-ThreadCache* ThreadCache::next_memory_steal_ = NULL; // 下一次steal的tc.
+ThreadCache* ThreadCache::next_memory_steal_ = NULL; // 下一次steal的tc.steal是减少其他thread_cache的max_size来增加自己的max_size
 #ifdef HAVE_TLS
 __thread ThreadCache::ThreadLocalData ThreadCache::threadlocal_data_
     ATTR_INITIAL_EXEC
@@ -212,6 +212,7 @@ void ThreadCache::ReleaseToCentralCache(FreeList* src, size_t cl, int N) {
 }
 
 // Release idle memory to the central cache
+//对每个freelist都拿出一些object(根据lowwatermark来确定数目)来释放掉
 void ThreadCache::Scavenge() {
   // If the low-water mark for the free list is L, it means we would
   // not have had to allocate anything from the central cache even if
@@ -253,6 +254,7 @@ void ThreadCache::IncreaseCacheLimit() {
 //这个函数是在计算这个tc里面最多可以分配多少内存
 //总之tc的max_size分配策略的话就是根据当前所有tc剩余的空间如果没有空间的话那么尝试从其他的tc里面获取。
 //应该是想限制一开始每个tc的最大大小。 但是需要注意的是，这个tc最大大小并不是一成不变的，可能会随着时间变化而增加。 
+//从next_memory_steal开始遍历，最多找10个freelist，每个freelist里偷去stealCount出来，减少别的freelist的max_size，增加自己的max_size
 void ThreadCache::IncreaseCacheLimitLocked() {
   if (unclaimed_cache_space_ > 0) {// 如果tc里面还有空闲的内容的话，那么获取64KB过来
     // Possibly make unclaimed_cache_space_ negative.
