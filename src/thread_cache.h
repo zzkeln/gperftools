@@ -375,7 +375,7 @@ inline bool ThreadCache::SampleAllocation(size_t k) {
 //注意在Init时候的话每个tc里面是没有任何内容的。
 inline void* ThreadCache::Allocate(size_t size, size_t cl) {
   ASSERT(size <= kMaxSize);
- //三个数组的index是cl， 这个object得大小是size字节
+ //三个数组的index是cl， 这个object的大小是size字节
   ASSERT(size == Static::sizemap()->ByteSizeForClass(cl));
 
   FreeList* list = &list_[cl];
@@ -387,6 +387,8 @@ inline void* ThreadCache::Allocate(size_t size, size_t cl) {
 }
 
 //释放ptr，对应的sizeclass=cl
+//两种条件下会回收内存，一个是list too long，即这个freelist中的object数目超过max_length时，一个是这个threadcache
+//所占字节超过max_size时
 inline void ThreadCache::Deallocate(void* ptr, size_t cl) {
   FreeList* list = &list_[cl];
  //当前ThreadCache占用的内存+cl对应的字节数
@@ -408,11 +410,11 @@ inline void ThreadCache::Deallocate(void* ptr, size_t cl) {
   // because of the bitwise-or trick that follows.
   if (UNLIKELY((list_headroom | size_headroom) < 0)) {// 这个部分应该是有任意一个<0的话，那么就应该进入。优化手段吧.
     if (list_headroom < 0) {// 如果当前长度>max_length的话，那么需要重新设置max_length.
-      ListTooLong(list, cl);
+      ListTooLong(list, cl); //基本上这个函数就是将cl是否nums_to_move个object到central_freelist然后更新下max_length
     }
    // 条件相当 if(size_headroom < 0)
         // 因为ListTooLog会尝试修改size_所以这里重新判断..:(tricky:(.
-    if (size_ >= max_size_) Scavenge(); // 如果当前size>max_size的话，那么需要进行GC.
+    if (size_ >= max_size_) Scavenge(); // 如果当前size>max_size的话，那么需要进行GC. 这里的GC是从每个freelist里都拿出一些object然后释放掉
   }
 }
 
