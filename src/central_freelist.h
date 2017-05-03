@@ -77,21 +77,21 @@ class CentralFreeList {
   int RemoveRange(void **start, void **end, int N);
 
   // Returns the number of free objects in cache.
-  // 在cache里面存在多少个free objects(不包含transfer cache)
+  // 在cache里面存在多少个free objects(不包含transfer cache),即nonempty span里有多少空闲的object数量
   int length() {
     SpinLockHolder h(&lock_);
     return counter_;
   }
 
   // Returns the number of free objects in the transfer cache.
-  // transfer cache里面包含多少free objects.
+  // transfer cache（tc_slots）里面包含多少free objects.
   int tc_length();
 
   // Returns the memory overhead (internal fragmentation) attributable
   // to the freelist.  This is memory lost when the size of elements
   // in a freelist doesn't exactly divide the page-size (an 8192-byte
   // page full of 5-byte objects would have 2 bytes memory overhead).
-  // 因为内部碎片造成的额外开销
+  // 因为内部碎片造成的额外开销，因为当前central_cache对应的sizeclass的字节可能是5字节，那么1page 8192字节不能整除5，会有2字节的内存碎片
   size_t OverheadBytes();
 
   // Lock/Unlock the internal SpinLock. Used on the pthread_atfork call
@@ -108,8 +108,8 @@ class CentralFreeList {
   // TransferCache is used to cache transfers of
   // sizemap.num_objects_to_move(size_class) back and forth between
   // thread caches and the central cache for a given size class.
-  // transfer_cache用来cache住thread_cache和central_freelist之间移动的object。
-  //thread_cache将N个object返回给central_freelist时，会占用一个slot，且设置head和tail为返还内存的起始和结尾地址
+  // transfer_cache用来cache住thread_cache和central_freelist之间移动的object（所以tc_slots每个链表的object数量是num_objects_to_move）。
+  //thread_cache将num_object_to_move个object返回给central_freelist时，会占用一个slot，且设置head和tail为返还内存的起始和结尾地址
   struct TCEntry {
     void *head;  // Head of chain of objects.
     void *tail;  // Tail of chain of objects.
@@ -189,7 +189,7 @@ class CentralFreeList {
   Span     empty_;          // Dummy header for list of empty spans，empty span链表的表头
   Span     nonempty_;       // Dummy header for list of non-empty spans，non-empty span链表的表头
   size_t   num_spans_;      // Number of spans in empty_ plus nonempty_, span对象的个数
-  size_t   counter_;        // Number of free objects in cache entry， tc_slots中的object数目
+  size_t   counter_;        // Number of free objects in cache entry，
 
   // Here we reserve space for TCEntry cache slots.  Space is preallocated
   // for the largest possible number of entries than any one size class may
