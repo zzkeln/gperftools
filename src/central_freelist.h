@@ -110,6 +110,8 @@ class CentralFreeList {
   // thread caches and the central cache for a given size class.
   // transfer_cache用来cache住thread_cache和central_freelist之间移动的object（所以tc_slots每个链表的object数量是num_objects_to_move）。
   //thread_cache将num_object_to_move个object返回给central_freelist时，会占用一个slot，且设置head和tail为返还内存的起始和结尾地址
+ //一个tc链表的object数量肯定等于num_objects_to_move，这样不管是将这个slot分配给thread_cache还是将thread_cache还回来的num_object_to_move
+ //放回slot，都只要设置链表的头尾节点即可，中间部分不用动，这样最高效
   struct TCEntry {
     void *head;  // Head of chain of objects.
     void *tail;  // Tail of chain of objects.
@@ -162,6 +164,7 @@ class CentralFreeList {
   // Tries to make room for a TCEntry.  If the cache is full it will try to
   // expand it at the cost of some other cache size.  Return false if there is
   // no space.
+ //争取弄一个空闲的tc_slot出来
   bool MakeCacheSpace() EXCLUSIVE_LOCKS_REQUIRED(lock_);
 
   // REQUIRES: lock_ for locked_size_class is held.
