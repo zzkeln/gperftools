@@ -55,6 +55,7 @@ namespace tcmalloc {
  
 // Data kept per size-class in central cache.
 //每个sizeclass对应一个CentralFreeList，由init函数来设置sizeclass
+//counter_表示non-empty-span中空闲Object
 class CentralFreeList {
  public:
   // A CentralFreeList may be used before its constructor runs.
@@ -91,7 +92,10 @@ class CentralFreeList {
   // to the freelist.  This is memory lost when the size of elements
   // in a freelist doesn't exactly divide the page-size (an 8192-byte
   // page full of 5-byte objects would have 2 bytes memory overhead).
-  // 因为内部碎片造成的额外开销，因为当前central_cache对应的sizeclass的字节可能是5字节，那么1page 8192字节不能整除5，会有2字节的内存碎片
+  // 因为内部碎片造成的额外开销，因为当前central_cache对应的sizeclass的字节可能是5字节，
+  //那么1page 8192字节不能整除5，会有2字节的内存碎片
+  //当前central_cache总的内存碎片，从span的角度来看，因为pageheap是按照span来分配连续内存页给central_freelist的
+  //总分配的span数量*一个span的内部内存碎片大小就是总的碎片开销
   size_t OverheadBytes();
 
   // Lock/Unlock the internal SpinLock. Used on the pthread_atfork call
@@ -195,7 +199,7 @@ class CentralFreeList {
   Span     empty_;          // Dummy header for list of empty spans，empty span链表的表头
   Span     nonempty_;       // Dummy header for list of non-empty spans，non-empty span链表的表头
   size_t   num_spans_;      // Number of spans in empty_ plus nonempty_, span对象的个数
-  size_t   counter_;        // Number of free objects in cache entry，
+  size_t   counter_;        // Number of free objects in cache entry， span里空闲的object数量
 
   // Here we reserve space for TCEntry cache slots.  Space is preallocated
   // for the largest possible number of entries than any one size class may
