@@ -164,7 +164,8 @@ class CentralFreeList {
   // Tries to make room for a TCEntry.  If the cache is full it will try to
   // expand it at the cost of some other cache size.  Return false if there is
   // no space.
- //争取弄一个空闲的tc_slot出来
+ //争取弄一个空闲的tc_slot出来（会尝试从其它的central_cache偷一个tc_entry，即减少其他central_cache的used_slots
+ //和cache_size，然后增加自己的cache_size，如果增加后的cache_size小于max_cache_size，那么返回true
   bool MakeCacheSpace() EXCLUSIVE_LOCKS_REQUIRED(lock_);
 
   // REQUIRES: lock_ for locked_size_class is held.
@@ -172,6 +173,7 @@ class CentralFreeList {
   // just iterates over the sizeclasses but does so without taking a lock.
   // Returns true on success.
   // May temporarily lock a "random" size class.
+ //随机地找一个Central_cache，并将里面的一个tc_slot的Object返回给span，空闲出来一个tc_slot
   static bool EvictRandomSizeClass(int locked_size_class, bool force);
 
   // REQUIRES: lock_ is *not* held.
@@ -181,6 +183,7 @@ class CentralFreeList {
   // May temporarily take lock_.  If it takes lock_, the locked_size_class
   // lock is released to keep the thread from holding two size class locks
   // concurrently which could lead to a deadlock.
+  //释放一个tc_slot，并将里面的object返回给span
   bool ShrinkCache(int locked_size_class, bool force) LOCKS_EXCLUDED(lock_);
 
   // This lock protects all the data members.  cached_entries and cache_size_
