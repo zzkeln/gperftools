@@ -48,7 +48,9 @@ struct Span {
   Length        length;         // Number of pages in span Span页面的数量，Length的类型也是uintptr_t。
   Span*         next;           // Used when in link list Span *next和Span *prev是Span的指针，当Span位于PageHeap的free list双向链表中。
   Span*         prev;           // Used when in link list
-  void*         objects;        // Linked list of free objects，free object链表的表头，也是基于单个节点内容存放下个节点地址来实现的
+  /*free object链表的表头，也是基于单个节点内容存放下个节点地址来实现的, objects连接的是当前span还剩余的object，如果为NULL的话
+  说明当前span没有剩余任何object，全部都分配出去了，也就是empty span了*/
+  void*         objects;        // Linked list of free objects，
   unsigned int  refcount : 16;  // Number of non-free objects 当前span已经分配出去多少objects
   unsigned int  sizeclass : 8;  // Size-class for small objects (or 0)
   unsigned int  location : 2;   // Is the span on a freelist, and if so, which?
