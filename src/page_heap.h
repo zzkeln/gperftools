@@ -238,7 +238,9 @@ class PERFTOOLS_DLL_DECL PageHeap {
   SpanList large_; // 对于>=kMaxPages的页面单独维护一个free list.
 
   // Array mapping from span length to a doubly linked list of free spans
-  SpanList free_[kMaxPages]; // 针对每个页面大小做的free list. 基本上1 page到kMaxPages个页都放这个数组中管理
+  //SpanList free_[kMaxPages]数组是按页大小递增的，即free_[1]是存放管理1页的Span，free_[2]是存放管理2页的Span，依此类推
+  SpanList free_[kMaxPages]; // 针对每个页面大小做的free list. 基本上1 page到kMaxPages个页都放这个数组中管理。
+  
   /*
   span的状态只有三种，一种是IN_USE表示正在被使用，一种表示ON_NORMAL_FREELIST表示放在了normal freelist上面。 
   另外一种是ON_RETURNED_FREELIST表示放在returned freelist上面。这里简单地说明一下normal freelist与returned freelist差别。 
@@ -251,6 +253,7 @@ class PERFTOOLS_DLL_DECL PageHeap {
   // Statistics on system, free, and unmapped bytes
   Stats stats_;
 
+  //申请一个n pages的span返回回去
   Span* SearchFreeAndLargeLists(Length n);
 
   bool GrowHeap(Length n);
