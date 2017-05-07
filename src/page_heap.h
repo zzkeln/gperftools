@@ -139,7 +139,7 @@ class PERFTOOLS_DLL_DECL PageHeap {
 
   // If this page heap is managing a range with starting page # >= start,
   // store info about the range in *r and return true.  Else return false.
-  bool GetNextRange(PageID start, base::MallocRange* r); / 如果page heap管理了>=start的span,那么返回这个信息
+  bool GetNextRange(PageID start, base::MallocRange* r); //如果page heap管理了>=start的span,那么返回这个信息
 
   // Page heap statistics
   struct Stats {
@@ -223,8 +223,8 @@ class PERFTOOLS_DLL_DECL PageHeap {
   // Pick the appropriate map and cache types based on pointer size
   typedef MapSelector<kAddressBits>::Type PageMap;
   typedef MapSelector<kAddressBits>::CacheType PageMapCache;
-  PageMap pagemap_;
-  mutable PageMapCache pagemap_cache_;
+  PageMap pagemap_; //pageID-> span*，即将pageID和span*关联起来
+  mutable PageMapCache pagemap_cache_; //pageID-> sizeclass，即将pageID和sizeclass关联起来
 
   // We segregate spans of a given size into two circular linked
   // lists: one for normal spans, and one for spans whose memory
@@ -238,7 +238,7 @@ class PERFTOOLS_DLL_DECL PageHeap {
   SpanList large_; // 对于>=kMaxPages的页面单独维护一个free list.
 
   // Array mapping from span length to a doubly linked list of free spans
-  SpanList free_[kMaxPages]; // 针对每个页面大小做的free list.
+  SpanList free_[kMaxPages]; // 针对每个页面大小做的free list. 基本上1 page到kMaxPages个页都放这个数组中管理
   /*
   span的状态只有三种，一种是IN_USE表示正在被使用，一种表示ON_NORMAL_FREELIST表示放在了normal freelist上面。 
   另外一种是ON_RETURNED_FREELIST表示放在returned freelist上面。这里简单地说明一下normal freelist与returned freelist差别。 
