@@ -52,6 +52,15 @@ namespace tcmalloc {
  的central cache对应一个数组元素，所以对不同sizeclass的central cache的访问是不冲突的，对cache的管理主要由类CentralFreeList来实现。
  CentralFreeListPadded Static::central_cache_[kNumClasses];
  */
+ /*
+ 因为cc是被全局操作的，所以这些接口在实际操作的时候内部都会首先尝试加上自选锁。
+ 很明显cc里面使用了free list链表结构管理这些free object. 之前说过ptmalloc2会有这么一个问题，
+ 就是如果局部线程分配过多的话没有机制将内存返回给主区域。而tcmalloc解决了这个问题。 
+ 对于每一个slab的tc返回的对象个数都是固定的，如果cc可以将这个返回的部分特殊处理的话，
+ 那么下次tc还需要这个部分的话， 那么就可以很快地进行分配，
+ 否则需要遍历如果freelist不够的话那么还需要从pageheap里面进行切片。
+ 而这个部分就叫做transfer cache.:) 了解了这些之后就可以看各个接口实现了。 
+ */
  
 // Data kept per size-class in central cache.
 //每个sizeclass对应一个CentralFreeList，由init函数来设置sizeclass
